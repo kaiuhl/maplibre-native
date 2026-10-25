@@ -391,3 +391,56 @@ TEST(TerrainElevationIndex, SymbolCollisionBoxesSitOnTheTerrain) {
     EXPECT_EQ(1u, test.frontend.getRenderer()->queryRenderedFeatures(onSurface, options).size());
     EXPECT_EQ(0u, test.frontend.getRenderer()->queryRenderedFeatures(atSeaLevel, options).size());
 }
+
+namespace {
+
+std::optional<double> eyeAltitude(MapAdapter& map) {
+    const auto eye = map.getFreeCameraOptions().getLocation();
+    return eye ? std::optional<double>(eye->altitude) : std::nullopt;
+}
+
+} // namespace
+
+// Tilted low over the plateau the eye would be under it; it is put on the ground at the same place,
+// looking at the same centre, as gl-js does (_elevateCameraIfInsideTerrain).
+TEST(TerrainElevationIndex, CameraUnderTheTerrainIsRaisedOntoIt) {
+    TerrainProjectionTest test;
+    test.map.setBounds(BoundOptions().withMaxPitch(85.0));
+    test.render(4);
+    ASSERT_TRUE(test.map.getTerrainElevation(innsbruck));
+
+    test.map.jumpTo(CameraOptions().withCenter(innsbruck).withZoom(14.0).withPitch(80.0).withBearing(30.0));
+    const auto under = eyeAltitude(test.map);
+    ASSERT_TRUE(under);
+    ASSERT_LT(*under, plateauMeters);
+    const auto before = test.map.getFreeCameraOptions().getLocation();
+
+    test.render(2);
+    const auto after = test.map.getFreeCameraOptions().getLocation();
+    ASSERT_TRUE(after);
+    EXPECT_NEAR(after->altitude, plateauMeters, 1.0);
+    EXPECT_NEAR(after->location.latitude(), before->location.latitude(), 1e-6);
+    EXPECT_NEAR(after->location.longitude(), before->location.longitude(), 1e-6);
+    const CameraOptions camera = test.map.getCameraOptions();
+    EXPECT_LT(*camera.pitch, 80.0);
+    EXPECT_NEAR(*camera.bearing, 30.0, 1e-6);
+    EXPECT_NEAR(camera.center->latitude(), innsbruck.latitude(), 1e-6);
+    EXPECT_NEAR(camera.center->longitude(), innsbruck.longitude(), 1e-6);
+}
+
+// A camera above the ground, or one with no terrain under it, is left where it is.
+TEST(TerrainElevationIndex, CameraAboveTheTerrainIsLeftAlone) {
+    TerrainProjectionTest test;
+    test.map.setBounds(BoundOptions().withMaxPitch(85.0));
+    test.render(4);
+    test.map.jumpTo(CameraOptions().withCenter(innsbruck).withZoom(10.0).withPitch(60.0));
+    test.render(2);
+    EXPECT_NEAR(*test.map.getCameraOptions().pitch, 60.0, 1e-9);
+    EXPECT_NEAR(*test.map.getCameraOptions().zoom, 10.0, 1e-9);
+
+    test.map.getStyle().setTerrain(nullptr);
+    test.render(1);
+    test.map.jumpTo(CameraOptions().withCenter(innsbruck).withZoom(14.0).withPitch(80.0));
+    test.render(2);
+    EXPECT_NEAR(*test.map.getCameraOptions().pitch, 80.0, 1e-9);
+}
