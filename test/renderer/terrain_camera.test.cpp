@@ -622,3 +622,28 @@ TEST(TerrainDrape, MasksAreDrawnOnlyForTilesOverlappingTheTarget) {
     EXPECT_LE(counts.drawn, 4 * counts.targets)
         << counts.drawn << " masks over " << counts.targets << " targets, " << counts.skipped << " skipped";
 }
+
+// Where the source has no DEM for a tile, the terrain draws its parent's, and the query reads that
+// too rather than finding nothing.
+TEST(TerrainElevation, QueryReadsTheParentDEMWhereATileHasNone) {
+    TerrainCameraTest test;
+    const LatLng innsbruck{47.2692, 11.4041};
+    test.map.jumpTo(CameraOptions().withZoom(1.0));
+    test.renderAndGetAltitude(4);
+    ASSERT_NEAR(test.frontend.getRenderer()->queryTerrainElevation(innsbruck).value_or(0.0), plateauMeters, 0.5);
+
+    test.fileSource->tileResponse = [&](const Resource& resource) {
+        Response res;
+        if (resource.url.find("/2-") != std::string::npos) {
+            res.noContent = true;
+        } else {
+            res.data = std::make_shared<std::string>(test.tile);
+        }
+        return res;
+    };
+    test.map.jumpTo(CameraOptions().withZoom(2.0));
+    test.renderAndGetAltitude(4);
+    const auto elevation = test.frontend.getRenderer()->queryTerrainElevation(innsbruck);
+    ASSERT_TRUE(elevation);
+    EXPECT_NEAR(*elevation, plateauMeters, 0.5);
+}

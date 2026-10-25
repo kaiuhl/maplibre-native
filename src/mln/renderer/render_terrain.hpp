@@ -1,5 +1,6 @@
 #pragma once
 
+#include <mln/geometry/dem_data.hpp>
 #include <mln/map/mode.hpp>
 #include <mln/style/terrain_impl.hpp>
 #include <mln/util/immutable.hpp>
@@ -164,9 +165,9 @@ public:
     /**
      * @brief Exaggerated terrain height under a geographic position
      *
-     * Samples at the depth of the finest DEM tile currently loaded. `getElevation` only
-     * matches a DEM tile that is the sample tile or an ancestor of it, so a fixed sample
-     * zoom silently reads 0 wherever the DEM is loaded deeper than that.
+     * Samples the DEM the terrain mesh draws with, at the depth of the finest one it holds.
+     * `getElevation` only matches a DEM tile that is the sample tile or an ancestor of it, so a
+     * fixed sample zoom silently reads 0 wherever the DEM is loaded deeper than that.
      *
      * @param latLng the position to sample
      * @return height in metres of the rendered surface, or 0 when no DEM covers it
@@ -174,12 +175,12 @@ public:
     double getElevationForLatLng(const LatLng& latLng) const;
 
     /**
-     * @brief Exaggerated terrain height under a geographic position, if a loaded DEM tile covers it
+     * @brief Exaggerated terrain height under a geographic position, if the terrain holds a DEM for it
      *
      * As getElevationForLatLng, but tells "no DEM here yet" apart from sea level.
      *
      * @param latLng the position to sample
-     * @return height in metres of the rendered surface, or nullopt when no loaded DEM tile covers it
+     * @return height in metres of the rendered surface, or nullopt when no DEM the terrain holds covers it
      */
     std::optional<double> queryElevation(const LatLng& latLng) const;
 
@@ -318,7 +319,7 @@ public:
     Immutable<style::Terrain::Impl> impl;
 
 private:
-    // getElevation, or nullopt when no loaded DEM tile covers the point.
+    // getElevation, or nullopt when no DEM the terrain holds covers the point.
     std::optional<float> sampleElevation(const UnwrappedTileID& tileID, float x, float y) const;
 
     /**
@@ -408,6 +409,9 @@ private:
         std::shared_ptr<gfx::Texture2D> texture;
         int32_t dim;
         uint64_t lastUsed = 0;
+        // The texture's elevations on the CPU, for sampleElevation. Shares the decoded image
+        // with the tile's bucket rather than copying it.
+        DEMData data;
     };
     std::map<UnwrappedTileID, DEMTextureEntry> demTextures;
     // Retention cap for demTextures (~1MB per 514x514 DEM texture); entries not
