@@ -8,6 +8,7 @@
 
 ### 🐞 Bug fixes
 
+- A camera placed by its position and looking within about 6 degrees of level, or up, now centres the map 10 km along its line of sight, as in MapLibre GL JS. It used to centre where its line of sight met the ground, which near level could be hundreds of kilometres out, so labels that far stayed on the horizon ([#XXXX](https://github.com/maplibre/maplibre-native/pull/XXXX)).
 - With 3D terrain on and the centre clamp enabled, the clamp no longer cancels a running camera animation; the camera is anchored to the ground once the animation ends ([#4768](https://github.com/maplibre/maplibre-native/pull/4768)).
 
 ## 13.7.1

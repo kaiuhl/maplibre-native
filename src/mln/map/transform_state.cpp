@@ -22,6 +22,11 @@ namespace mln {
  * the number of tiles needed to render the map.
  */
 const double maxMercatorHorizonAngle = util::deg2rad(89.25);
+// A line of sight whose downward slope (-forward z) is under this meets the ground too far off to
+// centre the map on (gl-js `_distanceToCenterFromAltElevationPitch`)...
+const double levelLineOfSight = 0.1;
+// ...so the centre stands this many metres along it instead.
+const double levelCenterDistance = 10000.0;
 
 namespace {
 LatLng latLngFromMercator(Point<double> mercatorCoordinate, LatLng::WrapMode wrapMode = LatLng::WrapMode::Unwrapped) {
@@ -269,18 +274,19 @@ void TransformState::updateStateFromCamera() {
     const double worldSz = Projection::worldSize(scale);
     const double planeZ = worldSz > 0.0 ? z / worldSz : 0.0;
     const double heightAbovePlane = position[2] - planeZ;
-    double zoom;
-    double newScale;
+    // How far along the line of sight the centre stands, in mercator units: where the line meets
+    // the plane, or - looking away from it, or within about 6 degrees of level, where that meeting
+    // runs off towards the horizon - a fixed 10 km out, as gl-js does
+    // (_distanceToCenterFromAltElevationPitch). The centre fixes the zoom, and so the distance
+    // things are measured against, such as the symbols' perspective cutoff.
     double travel;
-    if (dz < -1.0e-9 && heightAbovePlane > 1.0e-9 && newPitch <= maxMercatorHorizonAngle) {
-        zoom = util::log2(centerDistance / (heightAbovePlane / std::cos(newPitch) * util::tileSize_D));
-        newScale = util::clamp(std::pow(2.0, zoom), min_scale, max_scale);
+    if (dz < 0.0 && heightAbovePlane > 0.0 && std::abs(dz) >= levelLineOfSight) {
         travel = -heightAbovePlane / dz;
     } else {
-        zoom = 14;
-        newScale = util::clamp(std::pow(2.0, zoom), min_scale, max_scale);
-        travel = centerDistance / newScale / util::tileSize_D;
+        const double cameraLatitude = latLngFromMercator({position[0], position[1]}).latitude();
+        travel = levelCenterDistance / (Projection::getMetersPerPixelAtLatitude(cameraLatitude, 0) * util::tileSize_D);
     }
+    const double newScale = util::clamp(centerDistance / (travel * util::tileSize_D), min_scale, max_scale);
 
     // Compute center point of the map
     const Point<double> mercatorPoint = {position[0] + dx * travel, position[1] + dy * travel};

@@ -1186,6 +1186,42 @@ TEST(Transform, FreeCameraOptionsHighPitch) {
     EXPECT_THAT(transform.getFreeCameraOptions().position.value(), Vec3NearEquals1E5(vec3{{0.1, 0.1, 0.1}}));
 }
 
+// As in gl-js: a camera looking within about 6 degrees of level, or up, centres the map 10 km along
+// its line of sight; looking down more steeply, where the line meets the centre's plane. The
+// distance to the centre is what the symbols' perspective cutoff is measured against, and a
+// level line of sight meets the plane hundreds of kilometres out.
+TEST(Transform, FreeCameraOptionsCentreAlongALevelLineOfSight) {
+    Transform transform;
+    transform.resize({512, 512});
+    transform.setMaxPitch(180.0);
+    const LatLng camera{45.0, -117.0};
+    auto centreDistance = [&](double pitch) {
+        FreeCameraOptions options;
+        options.setLocation({camera, 2000.0});
+        options.setRollPitchBearing(0.0, pitch, 0.0);
+        transform.setFreeCameraOptions(options);
+        const auto& state = transform.getState();
+        const double down = 2000.0 - state.getCenterAltitude();
+        const double across = util::EARTH_RADIUS_M * util::deg2rad(state.getLatLng().latitude() - camera.latitude());
+        return std::hypot(down, across);
+    };
+    for (double pitch : {85.0, 88.0, 90.0, 120.0}) {
+        EXPECT_NEAR(10000.0, centreDistance(pitch), 50.0) << pitch;
+    }
+    // Steeper than that, the centre is where the line of sight meets the centre's plane: looking 80
+    // degrees from 3000 m over a plane at 1000 m, 2000 m down and 2000 tan(80) across.
+    transform.jumpTo(CameraOptions().withCenter(camera).withZoom(14.0).withPitch(0.0).withCenterAltitude(1000.0));
+    FreeCameraOptions options;
+    options.setLocation({camera, 3000.0});
+    options.setRollPitchBearing(0.0, 80.0, 0.0);
+    transform.setFreeCameraOptions(options);
+    // The plane is level in mercator units, so in metres it drifts a little with latitude.
+    EXPECT_NEAR(1000.0, transform.getState().getCenterAltitude(), 3.0);
+    const double across = util::EARTH_RADIUS_M *
+                          util::deg2rad(transform.getState().getLatLng().latitude() - camera.latitude());
+    EXPECT_NEAR(2000.0 * std::tan(util::deg2rad(80.0)), across, 20.0);
+}
+
 TEST(Transform, FreeCameraOptionsInvalidOrientation) {
     // Invalid orientations that cannot be clamped into a valid range
     Transform transform;
