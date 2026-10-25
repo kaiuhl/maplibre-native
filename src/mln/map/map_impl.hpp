@@ -144,6 +144,9 @@ public:
     /// Brings the centre down to sea level keeping the view or, where the limits refuse that,
     /// keeping the centre and zoom.
     void returnCenterToSeaLevel();
+    // Raise a camera that is below the terrain under it, looking at the same centre (gl-js's
+    // _elevateCameraIfInsideTerrain).
+    void keepCameraAboveTerrain();
     /// Runs a return still waiting before the app sets a camera, which every camera entry point
     /// does first, so that the return does not move the app's camera afterwards.
     void settleCenterAwaitingSeaLevel();

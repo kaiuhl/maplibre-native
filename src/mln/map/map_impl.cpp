@@ -141,6 +141,8 @@ void Map::Impl::onUpdate() {
         }
     }
 
+    keepCameraAboveTerrain();
+
     std::optional<Immutable<style::Terrain::Impl>> terrainImpl;
     if (auto* terrain = style->impl->getTerrain()) {
         terrainImpl = terrain->impl;
@@ -412,6 +414,42 @@ bool Map::Impl::setCenterAltitudeKeepingView(double altitudeMeters) {
     }
     transform.jumpTo(keepingView);
     return true;
+}
+
+void Map::Impl::keepCameraAboveTerrain() {
+    // A transition sets the camera every frame; moving it here would cancel the transition.
+    if (!terrainElevationIndex || !style->impl->getTerrain() || transform.inTransition()) {
+        return;
+    }
+    const TransformState& state = transform.getState();
+    const auto eye = state.getFreeCameraOptions().getLocation();
+    if (!eye) {
+        return;
+    }
+    const auto ground = terrainElevationIndex->getElevation(eye->location);
+    if (!ground || eye->altitude >= *ground) {
+        return;
+    }
+    const CameraOptions camera = transform.getCameraOptions(std::nullopt);
+    if (!camera.center || !camera.zoom) {
+        return;
+    }
+    // From the eye put back on the ground, at the same place, to the same centre: the pitch is
+    // the angle of the line between them off the vertical, and the zoom is the one that puts
+    // the centre that far along it (gl-js's calculateCameraOptionsFromTo).
+    const double rise = *ground - state.getCenterAltitude();
+    if (rise <= 0.0) {
+        return; // looking up at the centre, past what a pitch below 90 degrees can show
+    }
+    const double scale = state.getScale();
+    const Point<double> eyePoint = Projection::project(eye->location, scale);
+    const Point<double> centrePoint = Projection::project(*camera.center, scale);
+    const double metresPerPixel = Projection::getMetersPerPixelAtLatitude(camera.center->latitude(), *camera.zoom);
+    const double across = std::hypot(eyePoint.x - centrePoint.x, eyePoint.y - centrePoint.y) * metresPerPixel;
+    const double distance = std::hypot(across, rise);
+    const double pitch = util::rad2deg(std::atan2(across, rise));
+    const double zoom = *camera.zoom + std::log2(metresPerPixel * state.getCameraToCenterDistance() / distance);
+    transform.jumpTo(CameraOptions().withPitch(pitch).withZoom(zoom));
 }
 
 void Map::Impl::returnCenterToSeaLevel() {
