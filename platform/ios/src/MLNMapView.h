@@ -1060,6 +1060,50 @@ of north, the map will automatically snap to exact north.
 - (void)setZoomLevel:(double)zoomLevel animated:(BOOL)animated;
 
 /**
+ Where the camera itself stands: the point on the ground it is over.
+
+ A center coordinate describes the camera by the point it looks at, which
+ stops working as the pitch nears 90 degrees and the line of sight leaves the
+ ground. The camera's own position works at any pitch.
+ */
+@property (nonatomic, readonly) CLLocationCoordinate2D cameraLocation;
+
+/**
+ The camera's altitude above sea level, in meters.
+ */
+@property (nonatomic, readonly) CLLocationDistance cameraAltitude;
+
+/**
+ Puts the camera at a position and points it, without animation.
+
+ This places the camera itself rather than the point it looks at, so it can
+ stand on the ground and look level or up into the sky, as a person standing
+ there would. The center coordinate, zoom level and center altitude follow
+ from it, along the line of sight. The pitch is limited to `maximumPitch`;
+ raise that to look up.
+
+ @param location The point on the ground the camera is over.
+ @param altitude The camera's altitude above sea level, in meters.
+ @param direction The heading the camera faces, in degrees clockwise from
+    true north.
+ @param pitch The camera's pitch, in degrees: 0 looks straight down, 90 looks
+    level and more looks up.
+ */
+- (void)setCameraLocation:(CLLocationCoordinate2D)location
+                 altitude:(CLLocationDistance)altitude
+                direction:(CLLocationDirection)direction
+                    pitch:(CGFloat)pitch
+    NS_SWIFT_NAME(setCameraLocation(_:altitude:direction:pitch:));
+
+/**
+ The camera's vertical field of view, in degrees. The default is about 36.87.
+
+ A wider view shows more of the map at once, with more perspective; a narrower
+ one magnifies, as a telephoto lens does.
+ */
+@property (nonatomic) CGFloat verticalFieldOfView;
+
+/**
  * The minimum zoom level at which the map can be shown.
  *
  * Depending on the map view’s aspect ratio, the map view may be prevented

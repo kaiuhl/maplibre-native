@@ -3928,6 +3928,43 @@ static void *windowScreenContext = &windowScreenContext;
   [self setZoomLevel:zoomLevel animated:NO];
 }
 
+- (CLLocationCoordinate2D)cameraLocation {
+  std::optional<mln::LatLngAltitude> location = self.mbglMap.getFreeCameraOptions().getLocation();
+  return location ? MLNLocationCoordinate2DFromLatLng(location->location)
+                  : kCLLocationCoordinate2DInvalid;
+}
+
+- (CLLocationDistance)cameraAltitude {
+  std::optional<mln::LatLngAltitude> location = self.mbglMap.getFreeCameraOptions().getLocation();
+  return location ? location->altitude : 0;
+}
+
+- (void)setCameraLocation:(CLLocationCoordinate2D)location
+                 altitude:(CLLocationDistance)altitude
+                direction:(CLLocationDirection)direction
+                    pitch:(CGFloat)pitch {
+  MLNLogDebug(@"Setting camera location: %@ altitude: %f direction: %f pitch: %f",
+              MLNStringFromCLLocationCoordinate2D(location), altitude, direction, pitch);
+  if (!CLLocationCoordinate2DIsValid(location)) return;
+  [self cancelTransitions];
+  self.cameraChangeReasonBitmask |= MLNCameraChangeReasonProgrammatic;
+  mln::FreeCameraOptions options;
+  options.setLocation({MLNLatLngFromLocationCoordinate2D(location), altitude});
+  // Core's free camera turns counter-clockwise, as its transform does; a heading turns clockwise.
+  options.setRollPitchBearing(0, pitch, -direction);
+  self.mbglMap.setFreeCameraOptions(options);
+}
+
+- (CGFloat)verticalFieldOfView {
+  return MLNDegreesFromRadians(self.mbglMap.getTransformState().getFieldOfView());
+}
+
+- (void)setVerticalFieldOfView:(CGFloat)verticalFieldOfView {
+  MLNLogDebug(@"Setting verticalFieldOfView: %f", verticalFieldOfView);
+  self.cameraChangeReasonBitmask |= MLNCameraChangeReasonProgrammatic;
+  self.mbglMap.jumpTo(mln::CameraOptions().withFov(verticalFieldOfView));
+}
+
 - (void)setZoomLevel:(double)zoomLevel animated:(BOOL)animated {
   MLNLogDebug(@"Setting zoomLevel: %f animated: %@", zoomLevel, MLNStringFromBOOL(animated));
   if (zoomLevel == self.zoomLevel) return;

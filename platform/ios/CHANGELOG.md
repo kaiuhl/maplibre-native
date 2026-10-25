@@ -4,6 +4,7 @@ MapLibre welcomes participation and contributions from everyone. Please read [`M
 
 ## main
 
+- Add `-[MLNMapView setCameraLocation:altitude:direction:pitch:]`, `cameraLocation`, `cameraAltitude` and `verticalFieldOfView`. They place the camera itself rather than the point it looks at, so it can stand on the ground and look level or up into the sky ([#XXXX](https://github.com/maplibre/maplibre-native/pull/XXXX)).
 - Call offline-pack invalidation completion after the database operation finishes and propagate its errors.
 
 ## 7.0.0-pre2
