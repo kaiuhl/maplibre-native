@@ -308,6 +308,32 @@ MLN_EXPORT
  */
 @property (nonatomic, strong) MLNLight *light;
 
+// MARK: Managing the Style's Terrain
+
+/**
+ The identifier of the raster DEM source the map is draped over in 3D, or `nil`
+ when the map is flat.
+
+ This is the style's `terrain` property in the
+ <a href="https://maplibre.org/maplibre-style-spec/terrain/">MapLibre Style Spec</a>.
+ Set it to the identifier of an ``MLNRasterDEMSource`` in this style to drape the
+ map over that source's elevation data, or to `nil` to lay the map flat again.
+ Setting it keeps the current ``terrainExaggeration``.
+
+ Giving the terrain its own raster DEM source, even when a hillshade layer reads
+ the same tiles, keeps the style portable to MapLibre GL JS.
+ */
+@property (nonatomic, copy, nullable) NSString *terrainSourceIdentifier;
+
+/**
+ The vertical exaggeration of the terrain, where `1` draws the elevation at true
+ scale.
+
+ The default value of this property is `1`. Setting it has no effect while
+ ``terrainSourceIdentifier`` is `nil`.
+ */
+@property (nonatomic) double terrainExaggeration;
+
 // MARK: Localizing Map Content
 
 /**
