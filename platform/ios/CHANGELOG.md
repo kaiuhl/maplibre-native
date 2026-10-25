@@ -4,6 +4,7 @@ MapLibre welcomes participation and contributions from everyone. Please read [`M
 
 ## main
 
+- With 3D terrain, the ring of tiles added around the terrain's tile cover no longer overlaps tiles of another zoom in it. Overlapping tiles drew a coarse surface through the fine one at steep pitches, and draped custom layers drew a band where the two crossed ([#XXXX](https://github.com/maplibre/maplibre-native/pull/XXXX)).
 - Labels and icons more than five times as far from the camera as the centre of the map are no longer placed, as in MapLibre GL JS. At a high pitch they crowded the horizon ([#XXXX](https://github.com/maplibre/maplibre-native/pull/XXXX)).
 - Add `MLNMapCamera.centerAltitude`, so a camera set or read with 3D terrain keeps its height above the ground, and `-[MLNMapView elevationAtCoordinate:]`, which returns the terrain height under a coordinate like `queryTerrainElevation` in MapLibre GL JS ([#XXXX](https://github.com/maplibre/maplibre-native/pull/XXXX)).
 - With 3D terrain, a camera tilted low over high ground no longer ends up under the terrain: it is raised onto the ground at the same place and keeps looking at the same centre, as in MapLibre GL JS ([#XXXX](https://github.com/maplibre/maplibre-native/pull/XXXX)).
