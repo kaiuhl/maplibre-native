@@ -8,12 +8,17 @@
 #include <mln/map/map_options.hpp>
 #include <mln/math/angles.hpp>
 #include <mln/renderer/renderer.hpp>
+#include <mln/style/layers/custom_layer.hpp>
+#include <mln/style/layers/custom_layer_render_parameters.hpp>
 #include <mln/style/style.hpp>
 #include <mln/style/terrain.hpp>
 #include <mln/util/constants.hpp>
+#include <mln/util/projection.hpp>
 #include <mln/util/image.hpp>
+#include <mln/util/mat4.hpp>
 #include <mln/util/run_loop.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <thread>
@@ -609,6 +614,75 @@ TEST(TerrainElevation, QueryReadsTheTerrainAsDrawn) {
     test.renderAndGetAltitude(2);
     EXPECT_FALSE(test.frontend.getRenderer()->queryTerrainElevation(innsbruck));
 }
+
+// The default layer manager registers custom layers on OpenGL only (darwin registers its own).
+#if MLN_RENDER_BACKEND_OPENGL
+namespace {
+
+// Keeps what the terrain looked like to the custom layer the last time it drew.
+class TerrainRecordingLayer : public style::CustomLayerHost {
+public:
+    explicit TerrainRecordingLayer(std::optional<style::CustomLayerTerrain>& terrain_)
+        : terrain(terrain_) {}
+    void initialize(const style::CustomLayerInitParameters&) override {}
+    void render(const style::CustomLayerRenderParameters& parameters) override {
+        rendered = true;
+        terrain = parameters.terrain;
+    }
+    void contextLost() override {}
+    void deinitialize() override {}
+
+    bool rendered = false;
+    std::optional<style::CustomLayerTerrain>& terrain;
+};
+
+} // namespace
+
+// A custom layer is handed the terrain as the terrain pass draws it, so it can draw on the same
+// surface: each mesh tile with its matrix and DEM, and the DEM decoding.
+TEST(TerrainCustomLayer, RenderParametersCarryTheDrawnTerrain) {
+    TerrainCameraTest test;
+    std::optional<style::CustomLayerTerrain> terrain;
+    auto host = std::make_unique<TerrainRecordingLayer>(terrain);
+    auto* recorder = host.get();
+    test.map.getStyle().addLayer(std::make_unique<style::CustomLayer>("custom", std::move(host)));
+
+    test.renderAndGetAltitude(8);
+    ASSERT_TRUE(recorder->rendered);
+    ASSERT_TRUE(terrain);
+    EXPECT_FLOAT_EQ(terrain->exaggeration, 1.0f);
+    EXPECT_EQ(terrain->meshSize, 128u);
+    // Terrain-RGB ("mapbox"): (r * 65536 + g * 256 + b) * 0.1 - 10000.
+    EXPECT_FLOAT_EQ(terrain->unpack[0], 6553.6f);
+    EXPECT_FLOAT_EQ(terrain->unpack[3], 10000.0f);
+    ASSERT_FALSE(terrain->tiles.empty());
+
+    for (const auto& tile : terrain->tiles) {
+        ASSERT_TRUE(tile.demTexture);
+        EXPECT_GT(tile.demCoords[3], 1.0f) << "the plateau's DEM is bound, not the placeholder";
+    }
+
+    // The map centre (at sea level: the clamp is off) projects through its tile's matrix to the
+    // middle of the view.
+    const LatLng centre = *test.map.getCameraOptions({}).center;
+    const auto inTile = [&](const style::CustomLayerTerrainTile& tile) {
+        const auto point = Projection::project(centre, tile.z);
+        return tile.wrap == 0 && std::floor(point.x) == tile.x && std::floor(point.y) == tile.y;
+    };
+    const auto centreTile = std::find_if(terrain->tiles.begin(), terrain->tiles.end(), inTile);
+    ASSERT_NE(centreTile, terrain->tiles.end());
+    const auto point = Projection::project(centre, centreTile->z);
+    const vec4 local{(point.x - centreTile->x) * util::EXTENT, (point.y - centreTile->y) * util::EXTENT, 0, 1};
+    vec4 clip;
+    matrix::transformMat4(clip, local, centreTile->matrix);
+    EXPECT_NEAR(clip[0] / clip[3], 0.0, 1e-3);
+    EXPECT_NEAR(clip[1] / clip[3], 0.0, 1e-3);
+
+    test.map.getStyle().setTerrain(nullptr);
+    test.renderAndGetAltitude(2);
+    EXPECT_FALSE(terrain);
+}
+#endif
 
 // A drape target is drawn into only by the source tiles that overlap its own tile, so the
 // masks it draws follow those tiles and not every tile the source covers.

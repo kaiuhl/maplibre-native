@@ -245,6 +245,24 @@ public:
      */
     std::optional<TerrainData> getTerrainData(const UnwrappedTileID&) const;
 
+    /// Mesh resolution (grid cells per side)
+    static constexpr size_t MESH_SIZE = 128;
+
+    /// A tile the terrain pass draws this frame and the DEM it is lifted by.
+    struct DrawnTile {
+        OverscaledTileID id;
+        std::shared_ptr<gfx::Texture2D> demTexture;
+        /// As TerrainData::demCoords, with the DEM dimension in w
+        std::array<float, 4> demCoords;
+    };
+
+    /**
+     * @brief The tiles the terrain pass draws this frame, for layers that draw the terrain
+     * surface themselves (custom layers), the native analog of maplibre-gl-js
+     * `terrain.tileManager.getRenderableTiles()` with `getTerrainData` for each
+     */
+    std::vector<DrawnTile> getDrawnTiles() const;
+
     /**
      * @brief A 1x1 zero-elevation DEM texture bound when no DEM tile is available,
      * so shaders that declare the DEM sampler always have a valid binding
@@ -372,9 +390,6 @@ private:
     // feeds the instanced depth pass (see rebuildInstancedDepthDrawable / depthInstances).
     std::map<OverscaledTileID, float> drawableDemLayer;
 #endif
-
-    // Mesh resolution (grid cells per side)
-    static constexpr size_t MESH_SIZE = 128;
 
     // Log the camera eye's clearance over the rendered terrain (throttled), so tests can report
     // when the sea-level-anchored camera dips below terrain (TERRAIN.md Phase 4). See the .cpp.

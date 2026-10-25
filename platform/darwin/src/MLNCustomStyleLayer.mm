@@ -15,15 +15,61 @@
 #include <mln/style/layers/custom_layer.hpp>
 
 #if MLN_RENDER_BACKEND_METAL
+#include <mln/mtl/texture2d.hpp>
 #include <mln/style/layers/mtl/custom_layer_render_parameters.hpp>
 #endif
 
 class MLNCustomLayerHost;
 
+@implementation MLNTerrainTile
+
+- (instancetype)initWithTile:(const mln::style::CustomLayerTerrainTile &)tile {
+  if (self = [super init]) {
+    _zoomLevel = tile.z;
+    _x = tile.x;
+    _y = tile.y;
+    _wrap = tile.wrap;
+    _matrix = MLNMatrix4Make(tile.matrix);
+    _demCoords = simd_make_float4(tile.demCoords[0], tile.demCoords[1], tile.demCoords[2],
+                                  tile.demCoords[3]);
+#if MLN_RENDER_BACKEND_METAL
+    if (tile.demTexture) {
+      _demTexture =
+          (__bridge id<MTLTexture>)(static_cast<const mln::mtl::Texture2D &>(*tile.demTexture)
+                                        .getMetalTexture());
+    }
+#endif
+  }
+  return self;
+}
+
+@end
+
+@implementation MLNTerrainDrawingContext
+
+- (instancetype)initWithTerrain:(const mln::style::CustomLayerTerrain &)terrain {
+  if (self = [super init]) {
+    _exaggeration = terrain.exaggeration;
+    _demUnpack = simd_make_float4(terrain.unpack[0], terrain.unpack[1], terrain.unpack[2],
+                                  terrain.unpack[3]);
+    _meshSize = terrain.meshSize;
+    NSMutableArray<MLNTerrainTile *> *tiles =
+        [NSMutableArray arrayWithCapacity:terrain.tiles.size()];
+    for (const auto &tile : terrain.tiles) {
+      [tiles addObject:[[MLNTerrainTile alloc] initWithTile:tile]];
+    }
+    _tiles = tiles;
+  }
+  return self;
+}
+
+@end
+
 @interface MLNCustomStyleLayer ()
 @property (nonatomic, readonly) mln::style::CustomLayer *rawLayer;
 @property (nonatomic, readonly, nullable) MLNMapView *mapView;
 @property (nonatomic, weak, readwrite) MLNStyle *style;
+@property (nonatomic, readwrite, nullable) MLNTerrainDrawingContext *terrain;
 @end
 
 @implementation MLNCustomStyleLayer
@@ -130,9 +176,13 @@ public:
         .projectionMatrix = MLNMatrix4Make(parameters.projectionMatrix),
         .nearClippedProjectionMatrix = MLNMatrix4Make(parameters.nearClippedProjectionMatrix)};
 
+    layer.terrain = parameters.terrain
+                        ? [[MLNTerrainDrawingContext alloc] initWithTerrain:*parameters.terrain]
+                        : nil;
     if (layer.mapView) {
       [layer preDrawInMapView:layer.mapView withContext:drawingContext];
     }
+    layer.terrain = nil;
   }
 
   void render(const mln::style::CustomLayerRenderParameters &parameters) override {
@@ -160,9 +210,13 @@ public:
         .projectionMatrix = MLNMatrix4Make(parameters.projectionMatrix),
         .nearClippedProjectionMatrix = MLNMatrix4Make(parameters.nearClippedProjectionMatrix)};
 
+    layer.terrain = parameters.terrain
+                        ? [[MLNTerrainDrawingContext alloc] initWithTerrain:*parameters.terrain]
+                        : nil;
     if (layer.mapView) {
       [layer drawInMapView:layer.mapView withContext:drawingContext];
     }
+    layer.terrain = nil;
   }
 
   void contextLost() override {}
