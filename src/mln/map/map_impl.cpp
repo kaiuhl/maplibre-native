@@ -1,6 +1,7 @@
 #include <mln/layermanager/layer_manager.hpp>
 #include <mln/map/map_impl.hpp>
 #include <mln/math/wrap.hpp>
+#include <mln/renderer/terrain_elevation_index.hpp>
 #include <mln/renderer/update_parameters.hpp>
 #include <mln/storage/file_source.hpp>
 #include <mln/style/style_impl.hpp>
