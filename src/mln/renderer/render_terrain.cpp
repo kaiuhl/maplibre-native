@@ -316,7 +316,8 @@ void RenderTerrain::update(RenderOrchestrator& orchestrator,
                 existing->second.lastUsed = demUpdateCounter;
             } else if (auto texture = createDEMTexture(context, *demData)) {
                 // Keep the texture available for elevation sampling by non-draped layers
-                demTextures[renderTile.id] = {texture, demData->dim, demUpdateCounter};
+                demTextures.insert_or_assign(renderTile.id,
+                                             DEMTextureEntry{texture, demData->dim, demUpdateCounter, *demData});
 #if MLN_RENDER_BACKEND_OPENGL
                 // Also pack this tile's DEM into the array for the (upcoming) instanced
                 // depth pass. Additive: the per-tile texture above is still the fallback.
@@ -660,39 +661,28 @@ std::optional<float> RenderTerrain::sampleElevation(const UnwrappedTileID& tileI
         return std::nullopt;
     }
 
-    // Find the DEM tile matching the requested tile, or its closest available ancestor
-    const auto renderTiles = demSource->getRawRenderTiles();
-    const RenderTile* demRenderTile = nullptr;
+    // Read the DEM the terrain mesh draws with: the tile's own, or its closest cached ancestor,
+    // as getTerrainData finds it. The source's render tiles are not that: a tile that is still
+    // loading, or that the source has no data for, is a render tile without a DEM while the mesh
+    // keeps drawing its ancestor's.
+    const UnwrappedTileID* demTileID = nullptr;
+    const DEMTextureEntry* entry = nullptr;
     int bestZoom = -1;
-    for (const auto& renderTile : *renderTiles) {
-        const UnwrappedTileID& candidate = renderTile.id;
+    for (const auto& [candidate, candidateEntry] : demTextures) {
         if ((candidate == tileID || tileID.isChildOf(candidate)) &&
             static_cast<int>(candidate.canonical.z) > bestZoom) {
             bestZoom = candidate.canonical.z;
-            demRenderTile = &renderTile;
+            demTileID = &candidate;
+            entry = &candidateEntry;
         }
     }
-    if (!demRenderTile) {
+    if (!entry) {
         return std::nullopt;
     }
-
-    const auto& tile = demRenderTile->getTile();
-    if (tile.kind != Tile::Kind::RasterDEM) {
-        return std::nullopt;
-    }
-    auto* demTile = const_cast<RasterDEMTile*>(static_cast<const RasterDEMTile*>(&tile));
-    auto* bucket = demTile->getBucket();
-    if (!bucket) {
-        return std::nullopt;
-    }
-    const auto& demData = bucket->getDEMData();
-    if (!demData.getImagePtr() || demData.dim <= 0) {
-        return std::nullopt;
-    }
+    const DEMData& demData = entry->data;
 
     // Map the tile-local coordinate into the (possibly ancestor) DEM tile
-    const UnwrappedTileID& demTileID = demRenderTile->id;
-    const auto off = demSubTileOffset(tileID.canonical, demTileID.canonical);
+    const auto off = demSubTileOffset(tileID.canonical, demTileID->canonical);
     const float xInDem = (off.dx * util::EXTENT + x) / off.scale;
     const float yInDem = (off.dy * util::EXTENT + y) / off.scale;
 
@@ -726,14 +716,11 @@ std::optional<double> RenderTerrain::queryElevation(const LatLng& latLng) const 
         return std::nullopt;
     }
 
-    // Sample as deep as the finest DEM tile loaded: getElevation walks up to the closest
-    // covering ancestor, but never down, so sampling shallower than the DEM reads nothing.
+    // Sample as deep as the finest DEM the terrain holds: sampleElevation walks up to the
+    // closest cached ancestor, but never down, so sampling shallower than the DEM reads nothing.
     int sampleZoom = -1;
-    const auto renderTiles = demSource->getRawRenderTiles();
-    for (const auto& renderTile : *renderTiles) {
-        if (renderTile.getTile().kind == Tile::Kind::RasterDEM) {
-            sampleZoom = std::max(sampleZoom, static_cast<int>(renderTile.id.canonical.z));
-        }
+    for (const auto& [id, entry] : demTextures) {
+        sampleZoom = std::max(sampleZoom, static_cast<int>(id.canonical.z));
     }
     if (sampleZoom < 0) {
         return std::nullopt;
