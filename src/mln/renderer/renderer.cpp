@@ -74,7 +74,7 @@ std::optional<double> Renderer::queryTerrainElevation(const LatLng& latLng) cons
     if (!terrain || !terrain->isEnabled()) {
         return std::nullopt;
     }
-    return terrain->queryElevation(latLng);
+    return terrain->getElevationForLatLng(latLng);
 }
 
 AnnotationIDs Renderer::queryPointAnnotations(const ScreenBox& box) const {
