@@ -176,9 +176,13 @@ public:
         .projectionMatrix = MLNMatrix4Make(parameters.projectionMatrix),
         .nearClippedProjectionMatrix = MLNMatrix4Make(parameters.nearClippedProjectionMatrix)};
 
+    layer.terrain = parameters.terrain
+                        ? [[MLNTerrainDrawingContext alloc] initWithTerrain:*parameters.terrain]
+                        : nil;
     if (layer.mapView) {
       [layer preDrawInMapView:layer.mapView withContext:drawingContext];
     }
+    layer.terrain = nil;
   }
 
   void render(const mln::style::CustomLayerRenderParameters &parameters) override {

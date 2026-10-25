@@ -75,7 +75,8 @@ struct CustomLayerRenderParameters {
     std::array<double, 16> nearClippedProjectionMatrix;
 
     /// The 3D terrain, when the style has terrain, so the layer can draw on it rather than at sea
-    /// level. The terrain has been drawn and its depth written by the time the layer renders.
+    /// level. In `render` the terrain has been drawn this frame and its depth written; in
+    /// `preRender` it is the terrain the previous frame drew, as the terrain updates after layers.
     std::optional<CustomLayerTerrain> terrain;
 
     CustomLayerRenderParameters(const PaintParameters&);

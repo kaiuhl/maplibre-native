@@ -143,8 +143,11 @@ MLN_EXPORT
 
 /// The 3D terrain as it is drawn in the current frame, or `nil` if the style has no terrain.
 ///
-/// Valid only within ``drawInMapView:withContext:``. Use it to draw on the terrain rather than at
-/// sea level, under it.
+/// Valid only within ``drawInMapView:withContext:``, where it is the terrain this frame draws, and
+/// ``preDrawInMapView:withContext:``, where it is the terrain the previous frame drew (the terrain
+/// is updated after the layers). Use it to draw on the terrain rather than at sea level, under it:
+/// in ``preDrawInMapView:withContext:``, for example, to render the layer into a texture per
+/// terrain tile with ``commandBuffer``, and in ``drawInMapView:withContext:`` to drape them.
 @property (nonatomic, readonly, nullable) MLNTerrainDrawingContext *terrain;
 
 #if MLN_RENDER_BACKEND_METAL
