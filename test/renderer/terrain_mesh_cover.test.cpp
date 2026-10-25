@@ -102,3 +102,34 @@ TEST(TerrainMeshCover, CapKeepsTheTileUnderATiltedCamera) {
     const std::set<UnwrappedTileID> kept = RenderTerrain::nearestMeshTiles({underTheCamera, ahead}, 1, origin);
     EXPECT_EQ(std::set<UnwrappedTileID>{underTheCamera}, kept);
 }
+
+TEST(TerrainMeshCover, DilationAddsTheRingAroundOneTile) {
+    const auto dilated = RenderTerrain::dilateMeshCover({z2(1, 1)});
+    EXPECT_EQ(9u, dilated.size());
+    EXPECT_TRUE(dilated.contains(z2(0, 0)));
+    EXPECT_TRUE(dilated.contains(z2(2, 2)));
+}
+
+// A cover with an LOD mixes zooms: the ring of a deep tile can fall inside a shallow cover tile,
+// and the ring of a shallow tile over deep ones. Overlapping mesh tiles draw two surfaces in one
+// place, so no neighbour that overlaps the cover, or a deeper neighbour, joins it.
+TEST(TerrainMeshCover, DilationNeverOverlapsTheCover) {
+    const UnwrappedTileID shallow(0, CanonicalTileID(3, 2, 2));
+    const UnwrappedTileID deep(0, CanonicalTileID(4, 6, 4)); // beside (3, 2, 2), east
+    const auto dilated = RenderTerrain::dilateMeshCover({shallow, deep});
+    for (const auto& a : dilated) {
+        for (const auto& b : dilated) {
+            EXPECT_FALSE(a != b && (a.isChildOf(b) || b.isChildOf(a)))
+                << a.canonical.z << "/" << a.canonical.x << "/" << a.canonical.y << " overlaps " << b.canonical.z << "/"
+                << b.canonical.x << "/" << b.canonical.y;
+        }
+    }
+    // (4, 5, 4), west of the deep tile, is inside the shallow one and stays out; (3, 3, 2), east
+    // of the shallow one, holds the deep tile and stays out, its other quarters taken by the deep
+    // tile's ring instead.
+    EXPECT_FALSE(dilated.contains(UnwrappedTileID(0, CanonicalTileID(4, 5, 4))));
+    EXPECT_FALSE(dilated.contains(UnwrappedTileID(0, CanonicalTileID(3, 3, 2))));
+    EXPECT_TRUE(dilated.contains(UnwrappedTileID(0, CanonicalTileID(4, 7, 4))));
+    EXPECT_TRUE(dilated.contains(UnwrappedTileID(0, CanonicalTileID(4, 7, 5))));
+    EXPECT_TRUE(dilated.contains(UnwrappedTileID(0, CanonicalTileID(3, 1, 1))));
+}
