@@ -7,6 +7,7 @@
 #include <mln/map/camera.hpp>
 #include <mln/map/map_options.hpp>
 #include <mln/math/angles.hpp>
+#include <mln/renderer/renderer.hpp>
 #include <mln/style/style.hpp>
 #include <mln/style/terrain.hpp>
 #include <mln/util/constants.hpp>
@@ -586,6 +587,27 @@ TEST(TerrainCamera, ClampDoesNotApplyAfterTerrainRemoval) {
     ASSERT_TRUE(removedMidTransition);
 
     EXPECT_NEAR(test.altitude(), 0.0, 0.001);
+}
+
+// The terrain height under a position reads the loaded DEM, as drawn: nothing before a tile
+// covers it, the plateau once one does, scaled by the exaggeration, and nothing without terrain.
+TEST(TerrainElevation, QueryReadsTheTerrainAsDrawn) {
+    TerrainCameraTest test;
+    const LatLng innsbruck{47.2692, 11.4041};
+    EXPECT_FALSE(test.frontend.getRenderer()->queryTerrainElevation(innsbruck));
+
+    test.renderAndGetAltitude(8);
+    const auto elevation = test.frontend.getRenderer()->queryTerrainElevation(innsbruck);
+    ASSERT_TRUE(elevation);
+    EXPECT_NEAR(*elevation, plateauMeters, 0.5);
+
+    test.map.getStyle().setTerrain(std::make_unique<style::Terrain>("dem", 2.0f));
+    test.renderAndGetAltitude(2);
+    EXPECT_NEAR(test.frontend.getRenderer()->queryTerrainElevation(innsbruck).value_or(0.0), 2 * plateauMeters, 1.0);
+
+    test.map.getStyle().setTerrain(nullptr);
+    test.renderAndGetAltitude(2);
+    EXPECT_FALSE(test.frontend.getRenderer()->queryTerrainElevation(innsbruck));
 }
 
 // A drape target is drawn into only by the source tiles that overlap its own tile, so the

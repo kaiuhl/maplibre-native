@@ -172,4 +172,39 @@
     XCTAssertEqual(camera1.hash, camera2.hash, @"Cameras with same properties including roll should have same hash.");
 }
 
+- (void)testCenterAltitudeDefaultsToSeaLevel {
+    XCTAssertEqual([MLNMapCamera camera].centerAltitude, 0);
+}
+
+- (void)testCenterAltitudeInCopyAndEncoding {
+    MLNMapCamera *camera = [MLNMapCamera cameraLookingAtCenterCoordinate:CLLocationCoordinate2DMake(45.2, -117.2)
+                                                                altitude:3000
+                                                                   pitch:60
+                                                                 heading:0];
+    camera.centerAltitude = 2150;
+
+    MLNMapCamera *copy = [camera copy];
+    XCTAssertEqual(copy.centerAltitude, 2150);
+
+    NSData *data = [NSKeyedArchiver archivedDataWithRootObject:camera requiringSecureCoding:YES error:NULL];
+    MLNMapCamera *decodedCamera = [NSKeyedUnarchiver unarchivedObjectOfClass:[MLNMapCamera class] fromData:data error:NULL];
+    XCTAssertEqual(decodedCamera.centerAltitude, 2150);
+    XCTAssertEqualObjects(decodedCamera, camera);
+}
+
+- (void)testCenterAltitudeInEqualityAndHash {
+    MLNMapCamera *camera1 = [MLNMapCamera camera];
+    camera1.centerAltitude = 2150;
+    MLNMapCamera *camera2 = [camera1 copy];
+
+    XCTAssertTrue([camera1 isEqual:camera2]);
+    XCTAssertTrue([camera1 isEqualToMapCamera:camera2]);
+    XCTAssertEqual(camera1.hash, camera2.hash);
+
+    // The same centre and altitude over another plane is another view.
+    camera2.centerAltitude = 0;
+    XCTAssertFalse([camera1 isEqual:camera2]);
+    XCTAssertFalse([camera1 isEqualToMapCamera:camera2]);
+}
+
 @end
