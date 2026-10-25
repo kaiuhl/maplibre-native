@@ -593,6 +593,8 @@ TEST(TerrainCamera, ClampDoesNotApplyAfterTerrainRemoval) {
     EXPECT_NEAR(test.altitude(), 0.0, 0.001);
 }
 
+// The default layer manager registers custom layers on OpenGL only (darwin registers its own).
+#if MLN_RENDER_BACKEND_OPENGL
 namespace {
 
 // Keeps what the terrain looked like to the custom layer the last time it drew.
@@ -658,6 +660,7 @@ TEST(TerrainCustomLayer, RenderParametersCarryTheDrawnTerrain) {
     test.renderAndGetAltitude(2);
     EXPECT_FALSE(terrain);
 }
+#endif
 
 // A drape target is drawn into only by the source tiles that overlap its own tile, so the
 // masks it draws follow those tiles and not every tile the source covers.
