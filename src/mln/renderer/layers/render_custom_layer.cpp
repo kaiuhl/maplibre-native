@@ -111,8 +111,10 @@ void RenderCustomLayer::update([[maybe_unused]] gfx::ShaderRegistry& shaders,
                                [[maybe_unused]] UniqueChangeRequestVec& changes) {
     // create layer group
     if (!layerGroup) {
+        // Not draped: only tile layer groups render into the terrain drape, and the host draws with its
+        // own projection in the main pass, like plugin layers.
         if (auto layerGroup_ = context.createLayerGroup(
-                layerIndex, /*initialCapacity=*/1, getID(), true)) { // TODO: make render to terrain optional?
+                layerIndex, /*initialCapacity=*/1, getID(), /*renderToTerrain=*/false)) {
             setLayerGroup(std::move(layerGroup_), changes);
         }
     }

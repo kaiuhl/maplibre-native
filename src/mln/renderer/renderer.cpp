@@ -7,6 +7,7 @@
 #include <mln/layermanager/layer_manager.hpp>
 #include <mln/renderer/renderer_impl.hpp>
 #include <mln/renderer/render_static_data.hpp>
+#include <mln/renderer/render_terrain.hpp>
 #include <mln/renderer/render_tree.hpp>
 #include <mln/renderer/update_parameters.hpp>
 #include <mln/util/error_sink.hpp>
@@ -66,6 +67,14 @@ std::vector<Feature> Renderer::queryRenderedFeatures(const ScreenCoordinate& poi
 std::vector<Feature> Renderer::queryRenderedFeatures(const ScreenBox& box, const RenderedQueryOptions& options) const {
     return impl->orchestrator.queryRenderedFeatures(
         {box.min, {box.max.x, box.min.y}, box.max, {box.min.x, box.max.y}, box.min}, options);
+}
+
+std::optional<double> Renderer::queryTerrainElevation(const LatLng& latLng) const {
+    const auto* terrain = impl->orchestrator.getRenderTerrain();
+    if (!terrain || !terrain->isEnabled()) {
+        return std::nullopt;
+    }
+    return terrain->queryElevation(latLng);
 }
 
 AnnotationIDs Renderer::queryPointAnnotations(const ScreenBox& box) const {

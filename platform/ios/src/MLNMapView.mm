@@ -3950,6 +3950,16 @@ static void *windowScreenContext = &windowScreenContext;
   return self.mbglMap.getCameraOptions().centerAltitude.value_or(0.0);
 }
 
+- (nullable NSNumber *)elevationAtCoordinate:(CLLocationCoordinate2D)coordinate {
+  mln::Renderer *renderer = _mbglMap ? self.renderer : nullptr;
+  if (!renderer || !CLLocationCoordinate2DIsValid(coordinate)) {
+    return nil;
+  }
+  std::optional<double> elevation =
+      renderer->queryTerrainElevation(MLNLatLngFromLocationCoordinate2D(coordinate));
+  return elevation ? @(*elevation) : nil;
+}
+
 - (BOOL)setCenterAltitudeKeepingView:(CLLocationDistance)altitude {
   MLNLogDebug(@"Setting centerAltitude keeping the view: %f", altitude);
   // Set before the call, which reports the camera change; take it back if nothing moved, or it
@@ -4582,6 +4592,7 @@ static void *windowScreenContext = &windowScreenContext;
   if (cameraOptions.roll) {
     camera.roll = cameraOptions.roll.value();
   }
+  camera.centerAltitude = cameraOptions.centerAltitude.value_or(mapCamera.centerAltitude.value_or(0));
 
   return camera;
 }
@@ -4597,6 +4608,7 @@ static void *windowScreenContext = &windowScreenContext;
   options.padding = MLNEdgeInsetsFromNSEdgeInsets(insets);
   options.zoom = MLNZoomLevelForAltitude(camera.altitude, camera.pitch,
                                          camera.centerCoordinate.latitude, self.frame.size);
+  options.centerAltitude = camera.centerAltitude;
   if (camera.heading >= 0) {
     options.bearing = camera.heading;
   }

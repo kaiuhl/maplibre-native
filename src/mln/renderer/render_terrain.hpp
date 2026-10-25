@@ -174,6 +174,16 @@ public:
     double getElevationForLatLng(const LatLng& latLng) const;
 
     /**
+     * @brief Exaggerated terrain height under a geographic position, if a loaded DEM tile covers it
+     *
+     * As getElevationForLatLng, but tells "no DEM here yet" apart from sea level.
+     *
+     * @param latLng the position to sample
+     * @return height in metres of the rendered surface, or nullopt when no loaded DEM tile covers it
+     */
+    std::optional<double> queryElevation(const LatLng& latLng) const;
+
+    /**
      * @brief Get the terrain exaggeration multiplier
      */
     float getExaggeration() const;
@@ -308,6 +318,9 @@ public:
     Immutable<style::Terrain::Impl> impl;
 
 private:
+    // getElevation, or nullopt when no loaded DEM tile covers the point.
+    std::optional<float> sampleElevation(const UnwrappedTileID& tileID, float x, float y) const;
+
     /**
      * @brief Generate terrain mesh geometry
      *

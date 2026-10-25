@@ -1603,6 +1603,7 @@ public:
   options.padding = MLNEdgeInsetsFromNSEdgeInsets(edgePadding);
   options.zoom = MLNZoomLevelForAltitude(camera.altitude, camera.pitch,
                                          camera.centerCoordinate.latitude, self.frame.size);
+  options.centerAltitude = camera.centerAltitude;
   if (camera.heading >= 0) {
     options.bearing = camera.heading;
   }
@@ -1739,10 +1740,12 @@ public:
   CGFloat pitch = cameraOptions.pitch ? *cameraOptions.pitch : *mapCamera.pitch;
   CLLocationDistance altitude =
       MLNAltitudeForZoomLevel(zoomLevel, pitch, centerCoordinate.latitude, self.frame.size);
-  return [MLNMapCamera cameraLookingAtCenterCoordinate:centerCoordinate
-                                              altitude:altitude
-                                                 pitch:pitch
-                                               heading:direction];
+  MLNMapCamera *camera = [MLNMapCamera cameraLookingAtCenterCoordinate:centerCoordinate
+                                                               altitude:altitude
+                                                                  pitch:pitch
+                                                                heading:direction];
+  camera.centerAltitude = cameraOptions.centerAltitude.value_or(mapCamera.centerAltitude.value_or(0));
+  return camera;
 }
 
 - (void)setAutomaticallyAdjustsContentInsets:(BOOL)automaticallyAdjustsContentInsets {

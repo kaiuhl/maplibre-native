@@ -1103,6 +1103,21 @@ of north, the map will automatically snap to exact north.
     NS_SWIFT_NAME(setCenterAltitudeKeepingView(_:));
 
 /**
+ Returns the height of the 3D terrain under the given coordinate, as drawn.
+
+ Use it to put a camera's ``MLNMapCamera/centerAltitude`` on the ground, or to
+ place your own 3D content on the terrain. The height is read from the terrain
+ tiles already loaded, so it is only as detailed as the current view.
+
+ @param coordinate The coordinate to sample.
+ @return The height above sea level in meters, with the terrain exaggeration
+    applied, or `nil` if the style has no terrain or the terrain under the
+    coordinate has not loaded yet.
+ */
+- (nullable NSNumber *)elevationAtCoordinate:(CLLocationCoordinate2D)coordinate
+    NS_SWIFT_NAME(elevation(at:));
+
+/**
  * The minimum zoom level at which the map can be shown.
  *
  * Depending on the map view’s aspect ratio, the map view may be prevented

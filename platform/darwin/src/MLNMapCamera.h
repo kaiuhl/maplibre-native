@@ -40,13 +40,29 @@ MLN_EXPORT
  situated.
 
  The altitude is the distance from the viewpoint to the map, perpendicular to
- the map plane. This property does not account for physical elevation.
+ the map plane, measured from ``centerAltitude``. This property does not
+ account for physical elevation.
 
  This property’s value may be less than that of the ``viewingDistance`` property.
  Setting this property automatically updates the ``viewingDistance`` property
  based on the ``pitch`` property’s current value.
  */
 @property (nonatomic) CLLocationDistance altitude;
+
+/**
+ The altitude of the ``centerCoordinate`` above sea level, in meters, with the
+ terrain exaggeration applied.
+
+ With 3D terrain, put the center on the ground under it so that ``altitude``
+ and ``viewingDistance`` are measured from the ground rather than from sea
+ level: otherwise a camera over high ground ends up much closer to it than
+ intended. `-[MLNMapView elevationAtCoordinate:]` gives the ground height under
+ a coordinate. Without terrain, leave this at 0.
+
+ A camera read from a map view carries the view's current center altitude, so
+ setting it back restores the same view.
+ */
+@property (nonatomic) CLLocationDistance centerAltitude;
 
 /**
  The straight-line distance from the viewpoint to the ``centerCoordinate``.
