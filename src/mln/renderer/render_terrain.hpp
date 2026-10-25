@@ -426,7 +426,7 @@ private:
         uint64_t lastUsed = 0;
         // The texture's elevations on the CPU, for sampleElevation. Shares the decoded image
         // with the tile's bucket rather than copying it.
-        DEMData data;
+        std::shared_ptr<const DEMData> data;
     };
     std::map<UnwrappedTileID, DEMTextureEntry> demTextures;
     // Retention cap for demTextures (~1MB per 514x514 DEM texture); entries not

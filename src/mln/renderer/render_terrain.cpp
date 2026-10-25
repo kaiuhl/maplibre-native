@@ -316,8 +316,10 @@ void RenderTerrain::update(RenderOrchestrator& orchestrator,
                 existing->second.lastUsed = demUpdateCounter;
             } else if (auto texture = createDEMTexture(context, *demData)) {
                 // Keep the texture available for elevation sampling by non-draped layers
-                demTextures.insert_or_assign(renderTile.id,
-                                             DEMTextureEntry{texture, demData->dim, demUpdateCounter, *demData});
+                demTextures.insert_or_assign(
+                    renderTile.id,
+                    DEMTextureEntry{
+                        texture, demData->dim, demUpdateCounter, std::make_shared<const DEMData>(*demData)});
 #if MLN_RENDER_BACKEND_OPENGL
                 // Also pack this tile's DEM into the array for the (upcoming) instanced
                 // depth pass. Additive: the per-tile texture above is still the fallback.
@@ -676,10 +678,10 @@ std::optional<float> RenderTerrain::sampleElevation(const UnwrappedTileID& tileI
             entry = &candidateEntry;
         }
     }
-    if (!entry) {
+    if (!entry || !entry->data) {
         return std::nullopt;
     }
-    const DEMData& demData = entry->data;
+    const DEMData& demData = *entry->data;
 
     // Map the tile-local coordinate into the (possibly ancestor) DEM tile
     const auto off = demSubTileOffset(tileID.canonical, demTileID->canonical);
