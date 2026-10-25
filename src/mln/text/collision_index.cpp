@@ -26,6 +26,10 @@ namespace {
 const float viewportPaddingDefault = 100;
 // Viewport padding must be much larger for static tiles to avoid clipped labels.
 const float viewportPaddingForStaticTiles = 1024;
+// Symbols whose perspective ratio is below this are too far from the camera to read, and at a high
+// pitch they crowd the horizon, so they are not placed (gl-js perspectiveRatioCutoff). The ratio is
+// 0.5 + 0.5 * cameraToCenterDistance / w, so 0.6 is five times the camera-to-centre distance.
+const float perspectiveRatioCutoff = 0.6f;
 
 inline float findViewportPadding(const TransformState& transformState, MapMode mapMode) {
     if (mapMode == MapMode::Tile) return viewportPaddingForStaticTiles;
@@ -170,7 +174,8 @@ std::pair<bool, bool> CollisionIndex::placeFeature(
         projectedBoxes.emplace_back(
             collisionBoundaries[0], collisionBoundaries[1], collisionBoundaries[2], collisionBoundaries[3]);
         if ((avoidEdges && !isInsideTile(collisionBoundaries, *avoidEdges)) || !isInsideGrid(collisionBoundaries) ||
-            (!allowOverlap && collisionGrid.hitTest(projectedBoxes.back().box(), collisionGroupPredicate))) {
+            (!allowOverlap && collisionGrid.hitTest(projectedBoxes.back().box(), collisionGroupPredicate)) ||
+            projectAnchor(posMatrix, box.anchor, getElevation).first < perspectiveRatioCutoff) {
             return {false, false};
         }
 
@@ -330,7 +335,8 @@ std::pair<bool, bool> CollisionIndex::placeLineFeature(
         }
     }
 
-    return {!collisionDetected && firstAndLastGlyph && inGrid, entirelyOffscreen};
+    const bool tooFar = projectedAnchor.first < perspectiveRatioCutoff;
+    return {!collisionDetected && firstAndLastGlyph && inGrid && !tooFar, entirelyOffscreen};
 }
 
 void CollisionIndex::insertFeature(const CollisionFeature& feature,

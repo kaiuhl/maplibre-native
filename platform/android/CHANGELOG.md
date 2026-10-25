@@ -10,6 +10,7 @@
 
 ### 🐞 Bug fixes
 
+- Labels and icons more than five times as far from the camera as the centre of the map are no longer placed, as in MapLibre GL JS. At a high pitch they crowded the horizon ([#XXXX](https://github.com/maplibre/maplibre-native/pull/XXXX)).
 - With 3D terrain on and the centre clamp enabled, the clamp no longer cancels a running camera animation; the camera is anchored to the ground once the animation ends ([#4768](https://github.com/maplibre/maplibre-native/pull/4768)).
 
 ## 13.7.1
