@@ -550,6 +550,15 @@ void Map::dumpDebugLogs() const {
               "----------");
 }
 
+void Map::setNearClipDistance(std::optional<double> metres) {
+    impl->transform.setNearClipDistance(metres);
+    impl->onUpdate();
+}
+
+std::optional<double> Map::getNearClipDistance() const {
+    return impl->transform.getState().getNearClipDistance();
+}
+
 void Map::setFreeCameraOptions(const FreeCameraOptions& camera) {
     impl->transform.setFreeCameraOptions(camera);
     impl->cameraMutated = true;

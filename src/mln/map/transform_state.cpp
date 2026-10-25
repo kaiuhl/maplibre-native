@@ -157,8 +157,16 @@ void TransformState::getProjMatrix(mat4& projMatrix, uint16_t nearZ, bool aligne
     updateCameraState();
 
     mat4 worldToCamera = camera.getWorldToCamera(scale, viewportMode == ViewportMode::FlippedY);
+    // 1 Z unit is a pixel at the center, so a near clip in metres is that many
+    // pixels per metre at the center's latitude. It only ever brings the default
+    // near plane nearer; a caller asking for a farther one keeps it.
+    double near = nearZ;
+    if (nearClipDistance && nearZ <= 1) {
+        const double pixelsPerMeter = 1.0 / Projection::getMetersPerPixelAtLatitude(getLatLng().latitude(), getZoom());
+        near = std::min(near, *nearClipDistance * pixelsPerMeter);
+    }
     mat4 cameraToClip = camera.getCameraToClipPerspective(
-        getFieldOfView(), static_cast<double>(size.width) / size.height, nearZ, farZ);
+        getFieldOfView(), static_cast<double>(size.width) / size.height, near, farZ);
 
     // Move the center of perspective to center of specified edgeInsets.
     // Values are in range [-1, 1] where the upper and lower range values
@@ -588,6 +596,14 @@ void TransformState::setMaxPitch(const double pitch_) {
 
 double TransformState::getMaxPitch() const {
     return maxPitch;
+}
+
+void TransformState::setNearClipDistance(std::optional<double> metres) {
+    nearClipDistance = metres && std::isfinite(*metres) && *metres > 0.0 ? metres : std::nullopt;
+}
+
+std::optional<double> TransformState::getNearClipDistance() const {
+    return nearClipDistance;
 }
 
 double TransformState::getMinFieldOfView() const {

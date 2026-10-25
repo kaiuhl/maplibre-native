@@ -78,6 +78,8 @@ public:
     void setMinPitch(double);
     void setMaxPitch(double);
 
+    void setNearClipDistance(std::optional<double> metres);
+
     // Zoom
 
     /** Returns the zoom level. */

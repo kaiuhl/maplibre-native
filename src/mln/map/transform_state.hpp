@@ -197,6 +197,13 @@ public:
     double getMinFieldOfView() const;
     double getMaxFieldOfView() const;
 
+    /// The nearest the camera draws, in metres, when nearer than the default
+    /// near plane of one pixel at the map's scale. A camera stood on the ground
+    /// looks out with its centre kilometres off, where one pixel is many metres,
+    /// and the ground at its feet would be cut. Unset or non-positive is the default.
+    void setNearClipDistance(std::optional<double> metres);
+    std::optional<double> getNearClipDistance() const;
+
     // Rotation
     double getBearing() const;
     void setBearing(double);
@@ -275,6 +282,7 @@ private:
     double maxPitch = util::DEFAULT_PITCH_MAX;
     double minFov = util::deg2rad(0.1);
     double maxFov = util::deg2rad(150.0);
+    std::optional<double> nearClipDistance;
 
     NorthOrientation orientation = NorthOrientation::Upwards;
 

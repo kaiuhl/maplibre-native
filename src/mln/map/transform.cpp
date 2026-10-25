@@ -467,6 +467,10 @@ void Transform::setMinPitch(const double minPitch) {
     state.setMinPitch(util::deg2rad(minPitch));
 }
 
+void Transform::setNearClipDistance(std::optional<double> metres) {
+    state.setNearClipDistance(metres);
+}
+
 void Transform::setMaxPitch(const double maxPitch) {
     if (std::isnan(maxPitch)) return;
     if (util::deg2rad(maxPitch) > util::PITCH_MAX) {

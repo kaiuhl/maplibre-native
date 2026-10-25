@@ -166,6 +166,13 @@ public:
     void setFreeCameraOptions(const FreeCameraOptions& camera);
     FreeCameraOptions getFreeCameraOptions() const;
 
+    /// The nearest the camera draws, in metres, when nearer than its default
+    /// near plane of one pixel at the map's scale: for a camera close to the
+    /// ground, such as one stood on it looking out. A nearer clip costs depth
+    /// precision far away. Unset or non-positive is the default.
+    void setNearClipDistance(std::optional<double> metres);
+    std::optional<double> getNearClipDistance() const;
+
     // Tile LOD controls
     //
     /// The number of map tile requests can be reduced by using a lower level

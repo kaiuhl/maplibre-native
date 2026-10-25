@@ -1268,3 +1268,66 @@ TEST(Camera, SetOrientationWithRollNoPitch) {
     EXPECT_NEAR(pitch, pitch_, 1.0e-9);
     EXPECT_NEAR(0.0, roll_, 1.0e-9);
 }
+
+namespace {
+
+// How far in front of the camera the near plane stands, in metres. Clip
+// w = d, the view depth in pixels, and clip z = B - A·d, so z + A·w is B
+// everywhere. Two points at different depths give A and B, and NDC z = -1
+// at d = B / (A - 1).
+double nearClipMetres(const TransformState& state) {
+    mat4 m;
+    state.getProjMatrix(m);
+    const auto clip = [&](const vec3& p) {
+        return std::pair{m[2] * p[0] + m[6] * p[1] + m[10] * p[2] + m[14],
+                         m[3] * p[0] + m[7] * p[1] + m[11] * p[2] + m[15]};
+    };
+    // Two points 1000 px apart along the view.
+    const vec3 view{{m[3], m[7], m[11]}};
+    const double step = 1000.0 / (view[0] * view[0] + view[1] * view[1] + view[2] * view[2]);
+    const auto [z1, w1] = clip(vec3{{0.0, 0.0, 0.0}});
+    const auto [z2, w2] = clip(vec3{{view[0] * step, view[1] * step, view[2] * step}});
+    const double a = (z1 - z2) / (w2 - w1);
+    const double b = z1 + a * w1;
+    return b / (a - 1.0) * Projection::getMetersPerPixelAtLatitude(state.getLatLng().latitude(), state.getZoom());
+}
+
+} // namespace
+
+TEST(Transform, NearClipDistanceBringsTheNearPlaneIn) {
+    Transform transform;
+    transform.resize({512, 512});
+    transform.setMaxPitch(170.0);
+    transform.jumpTo(CameraOptions().withCenter(LatLng{45.2, -117.3}).withZoom(14.0));
+
+    // A camera 500 m up, pitched 84°. The map centres where its line of sight
+    // meets the ground, about 5 km out, where a pixel is several metres.
+    FreeCameraOptions options;
+    options.setLocation({LatLng{45.2, -117.3}, 500.0});
+    options.setRollPitchBearing(0.0, 84.0, 0.0);
+    transform.setFreeCameraOptions(options);
+
+    const double metresPerPixel = Projection::getMetersPerPixelAtLatitude(transform.getState().getLatLng().latitude(),
+                                                                          transform.getState().getZoom());
+    // By default the near plane is one pixel at the map's scale.
+    EXPECT_NEAR(metresPerPixel, nearClipMetres(transform.getState()), metresPerPixel * 0.01);
+    EXPECT_GT(metresPerPixel, 4.0);
+
+    transform.setNearClipDistance(0.5);
+    EXPECT_EQ(0.5, transform.getState().getNearClipDistance());
+    EXPECT_NEAR(0.5, nearClipMetres(transform.getState()), 0.01);
+
+    // It never pushes the near plane out.
+    transform.setNearClipDistance(metresPerPixel * 10.0);
+    EXPECT_NEAR(metresPerPixel, nearClipMetres(transform.getState()), metresPerPixel * 0.01);
+
+    // Unset, zero, negative and NaN are the default.
+    for (const std::optional<double> unset : {std::optional<double>{},
+                                              std::optional<double>{0.0},
+                                              std::optional<double>{-1.0},
+                                              std::optional<double>{NAN}}) {
+        transform.setNearClipDistance(unset);
+        EXPECT_FALSE(transform.getState().getNearClipDistance());
+        EXPECT_NEAR(metresPerPixel, nearClipMetres(transform.getState()), metresPerPixel * 0.01);
+    }
+}
