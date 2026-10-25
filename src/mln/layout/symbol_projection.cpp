@@ -229,6 +229,31 @@ Point<float> projectTruncatedLineSegment(const Point<float>& previousTilePoint,
     return previousProjectedPoint + (projectedUnitSegment * (minimumLength / util::mag<float>(projectedUnitSegment)));
 }
 
+namespace {
+
+// The offset of a label-plane segment's normal: `lineOffsetY` along its left perpendicular, signed by the
+// direction the glyphs are walked.
+Point<float> offsetNormal(const Point<float>& segment, const float lineOffsetY, const int16_t dir) {
+    return util::perp(util::unit<float>(segment)) * (lineOffsetY * dir);
+}
+
+// Where the lines through two segments meet, or nothing when they are parallel.
+std::optional<Point<float>> lineIntersection(const Point<float>& a1,
+                                             const Point<float>& a2,
+                                             const Point<float>& b1,
+                                             const Point<float>& b2) {
+    const Point<float> a = a2 - a1;
+    const Point<float> b = b2 - b1;
+    const float denominator = b.y * a.x - b.x * a.y;
+    if (denominator == 0) {
+        return std::nullopt;
+    }
+    const Point<float> origin = a1 - b1;
+    return a1 + a * ((b.x * origin.y - b.y * origin.x) / denominator);
+}
+
+} // namespace
+
 std::optional<PlacedGlyph> placeGlyphAlongLine(const float offsetX,
                                                const float lineOffsetX,
                                                const float lineOffsetY,
@@ -262,16 +287,40 @@ std::optional<PlacedGlyph> placeGlyphAlongLine(const float offsetX,
     float distanceToPrev = 0.0;
     float currentSegmentDistance = 0.0;
     const float absOffsetX = std::abs(combinedOffsetX);
+    const auto inLine = [&](int32_t index) {
+        return index >= 0 && std::cmp_less(index, line.size());
+    };
+
+    // With a line offset the glyphs walk the offset line itself, as in maplibre-gl-js: each
+    // segment is offset along its own normal and extended or shortened to where it meets the
+    // next offset segment. Offsetting each glyph from its own segment instead piles glyphs up on
+    // the inside of a bend and spreads them on the outside.
+    std::optional<Point<float>> offsetPrev;
+    std::optional<Point<float>> offsetCurrent;
+    const auto offsetCorner = [&](int32_t index, const Point<float>& vertex, const Point<float>& normal) {
+        const Point<float> offsetVertex = vertex + normal;
+        if (!inLine(index + dir)) {
+            return offsetVertex;
+        }
+        const PointAndCameraDistance next = project(convertPoint<float>(line.at(index + dir)), labelPlaneMatrix);
+        if (next.second <= 0 || next.first == vertex) {
+            return offsetVertex;
+        }
+        const Point<float> nextNormal = offsetNormal(next.first - vertex, lineOffsetY, dir);
+        return lineIntersection(*offsetPrev, offsetVertex, vertex + nextNormal, next.first + nextNormal)
+            .value_or(offsetVertex);
+    };
 
     while (distanceToPrev + currentSegmentDistance <= absOffsetX) {
         currentIndex += dir;
 
         // offset does not fit on the projected line
-        if (currentIndex < 0 || std::cmp_greater_equal(currentIndex, static_cast<int32_t>(line.size()))) {
+        if (!inLine(currentIndex)) {
             return {};
         }
 
         prev = current;
+        offsetPrev = offsetCurrent;
         PointAndCameraDistance projection = project(convertPoint<float>(line.at(currentIndex)), labelPlaneMatrix);
         if (projection.second > 0) {
             current = projection.first;
@@ -287,16 +336,29 @@ std::optional<PlacedGlyph> placeGlyphAlongLine(const float offsetX,
         }
 
         distanceToPrev += currentSegmentDistance;
-        currentSegmentDistance = util::dist<float>(prev, current);
+        if (lineOffsetY == 0) {
+            currentSegmentDistance = util::dist<float>(prev, current);
+            continue;
+        }
+
+        // The anchor can sit on the vertex itself; take the normal from the segment after it.
+        Point<float> segment = current - prev;
+        if (segment == Point<float>{0, 0} && inLine(currentIndex + dir)) {
+            segment = project(convertPoint<float>(line.at(currentIndex + dir)), labelPlaneMatrix).first - current;
+        }
+        const Point<float> normal = offsetNormal(segment, lineOffsetY, dir);
+        if (!offsetPrev) {
+            offsetPrev = prev + normal;
+        }
+        offsetCurrent = offsetCorner(currentIndex, current, normal);
+        currentSegmentDistance = util::dist<float>(*offsetPrev, *offsetCurrent);
     }
 
     // The point is on the current segment. Interpolate to find it.
     const float segmentInterpolationT = (absOffsetX - distanceToPrev) / currentSegmentDistance;
-    const Point<float> prevToCurrent = current - prev;
-    Point<float> p = (prevToCurrent * segmentInterpolationT) + prev;
-
-    // offset the point from the line to text-offset and icon-offset
-    p += util::perp(prevToCurrent) * static_cast<float>(lineOffsetY * dir / util::mag(prevToCurrent));
+    const Point<float> segmentStart = lineOffsetY == 0 ? prev : *offsetPrev;
+    const Point<float> segmentEnd = lineOffsetY == 0 ? current : *offsetCurrent;
+    const Point<float> p = ((segmentEnd - segmentStart) * segmentInterpolationT) + segmentStart;
 
     const float segmentAngle = angle + std::atan2(current.y - prev.y, current.x - prev.x);
 

@@ -35,6 +35,7 @@
 ### 🐞 Bug fixes
 
 - *...Add new stuff here...*
+- [core] Fix line labels with a vertical `text-offset` losing their letter spacing at bends: glyphs now follow the offset line, as in MapLibre GL JS ([#XXXX](https://github.com/maplibre/maplibre-native/pull/XXXX)).
 - [core] Fix plugin layer filters ignoring the style's global state.
 - [core] Fix a crash in `RenderImageSource::update` when an image source's coordinates give an empty tile cover, such as an image wholly beyond the latitudes Web Mercator can show.
 - [OpenGL] Fix invisible raster layers on Adreno 3xx by avoiding an in-place alpha assignment in the fragment shader.

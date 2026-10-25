@@ -4,6 +4,7 @@ MapLibre welcomes participation and contributions from everyone. Please read [`M
 
 ## main
 
+- Fix line labels with a vertical `text-offset` losing their letter spacing at bends ([#XXXX](https://github.com/maplibre/maplibre-native/pull/XXXX)).
 - Call offline-pack invalidation completion after the database operation finishes and propagate its errors.
 
 ## 7.0.0-pre2
