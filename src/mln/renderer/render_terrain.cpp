@@ -753,6 +753,20 @@ double RenderTerrain::getElevationForLatLng(const LatLng& latLng) const {
     return getElevationWithExaggeration(sampleTile, localX, localY);
 }
 
+std::vector<RenderTerrain::DrawnTile> RenderTerrain::getDrawnTiles() const {
+    std::vector<DrawnTile> tiles;
+    if (!layerGroup) {
+        return tiles;
+    }
+    tiles.reserve(layerGroup->getDrawableCount());
+    visitLayerGroupDrawables(*layerGroup, [&](gfx::Drawable& drawable) {
+        if (const auto& tileID = drawable.getTileID(); tileID && drawable.getEnabled()) {
+            tiles.push_back({*tileID, drawable.getTexture(0), getDrawableDemCoords(*tileID)});
+        }
+    });
+    return tiles;
+}
+
 std::optional<RenderTerrain::TerrainData> RenderTerrain::getTerrainData(const UnwrappedTileID& tileID) const {
     // Find the DEM texture matching the requested tile, or its closest available ancestor
     const UnwrappedTileID* demTileID = nullptr;

@@ -1,5 +1,6 @@
 #include <mln/style/layers/custom_layer_render_parameters.hpp>
 #include <mln/renderer/paint_parameters.hpp>
+#include <mln/renderer/render_terrain.hpp>
 #include <mln/util/mat4.hpp>
 
 namespace mln {
@@ -19,6 +20,25 @@ CustomLayerRenderParameters::CustomLayerRenderParameters(const mln::PaintParamet
     state.getProjMatrix(projMatrix);
     projectionMatrix = projMatrix;
     nearClippedProjectionMatrix = paintParameters.transformParams.nearClippedProjMatrix;
+
+    const RenderTerrain* renderTerrain = paintParameters.terrain;
+    if (!renderTerrain || !renderTerrain->isEnabled()) {
+        return;
+    }
+    CustomLayerTerrain& drawn = terrain.emplace();
+    drawn.exaggeration = renderTerrain->getExaggeration();
+    drawn.unpack = renderTerrain->getDEMUnpackVector();
+    drawn.meshSize = static_cast<uint32_t>(RenderTerrain::MESH_SIZE);
+    for (const auto& tile : renderTerrain->getDrawnTiles()) {
+        const UnwrappedTileID unwrapped = tile.id.toUnwrapped();
+        drawn.tiles.push_back({unwrapped.canonical.z,
+                               unwrapped.canonical.x,
+                               unwrapped.canonical.y,
+                               unwrapped.wrap,
+                               paintParameters.matrixForTile(unwrapped),
+                               tile.demCoords,
+                               tile.demTexture});
+    }
 }
 
 } // namespace style

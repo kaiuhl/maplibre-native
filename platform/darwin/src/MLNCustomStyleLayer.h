@@ -1,6 +1,7 @@
 #import <CoreLocation/CoreLocation.h>
 #import <Foundation/Foundation.h>
 #import <QuartzCore/QuartzCore.h>
+#import <simd/simd.h>
 
 #import "MLNFoundation.h"
 #import "MLNGeometry.h"
@@ -35,6 +36,64 @@ typedef struct MLNStyleLayerDrawingContext {
   /// A 4×4 matrix representing the map view’s current near clip projection state.
   MLNMatrix4 nearClippedProjectionMatrix;
 } MLNStyleLayerDrawingContext;
+
+/// A tile of the 3D terrain as it is drawn in the current frame.
+///
+/// To draw on the terrain, draw the terrain's own surface for each tile: a grid of
+/// ``MLNTerrainDrawingContext/meshSize`` cells a side over tile coordinates 0 to 8192, each cell
+/// split from its top-right to its bottom-left corner. Lift each vertex by the height of
+/// ``demTexture`` under it, as described for ``demCoords``, then transform it by ``matrix``.
+///
+/// - Warning: This API experimental. It may change at any time without notice.
+MLN_EXPORT
+@interface MLNTerrainTile : NSObject
+
+/// The tile's zoom level.
+@property (nonatomic, readonly) NSUInteger zoomLevel;
+/// The tile's column.
+@property (nonatomic, readonly) NSUInteger x;
+/// The tile's row.
+@property (nonatomic, readonly) NSUInteger y;
+/// The world copy the tile is in: 0 for the primary world, -1 west of it, 1 east of it.
+@property (nonatomic, readonly) NSInteger wrap;
+/// Projects tile coordinates (x and y from 0 to 8192, z the elevation in meters) to clip space,
+/// in the same convention as ``MLNStyleLayerDrawingContext/projectionMatrix``.
+@property (nonatomic, readonly) MLNMatrix4 matrix;
+/// Maps a tile coordinate `pos` to a texel of ``demTexture``:
+/// `(pos * demCoords.x + demCoords.yz) * demCoords.w + border`, where `demCoords.w` is the
+/// DEM's size without its border and the border is half the rest of the texture's width. Read
+/// the four texels around that point, decode each with
+/// ``MLNTerrainDrawingContext/demUnpack``, interpolate, and multiply by
+/// ``MLNTerrainDrawingContext/exaggeration``. Packed heights cannot be filtered.
+@property (nonatomic, readonly) simd_float4 demCoords;
+#if MLN_RENDER_BACKEND_METAL
+/// The DEM the tile is lifted by; a 1×1 texture at sea level while no DEM covers it yet.
+@property (nonatomic, readonly) id<MTLTexture> demTexture;
+#endif
+
+- (instancetype)init NS_UNAVAILABLE;
+
+@end
+
+/// The 3D terrain as it is drawn in the current frame, for a custom style layer that draws on
+/// it. The terrain has been drawn, and its depth written, by the time the layer draws.
+///
+/// - Warning: This API experimental. It may change at any time without notice.
+MLN_EXPORT
+@interface MLNTerrainDrawingContext : NSObject
+
+/// The factor the DEM's heights are multiplied by.
+@property (nonatomic, readonly) float exaggeration;
+/// Decodes a DEM texel to meters: `dot(rgb * 255, demUnpack.xyz) - demUnpack.w`.
+@property (nonatomic, readonly) simd_float4 demUnpack;
+/// The number of cells a side of each tile's grid.
+@property (nonatomic, readonly) NSUInteger meshSize;
+/// The tiles the terrain is drawn with.
+@property (nonatomic, readonly) NSArray<MLNTerrainTile *> *tiles;
+
+- (instancetype)init NS_UNAVAILABLE;
+
+@end
 
 /// A style layer that is rendered by Metal code that you provide.
 ///
@@ -81,6 +140,12 @@ MLN_EXPORT
 #endif
 
 #pragma clang diagnostic pop
+
+/// The 3D terrain as it is drawn in the current frame, or `nil` if the style has no terrain.
+///
+/// Valid only within ``drawInMapView:withContext:``. Use it to draw on the terrain rather than at
+/// sea level, under it.
+@property (nonatomic, readonly, nullable) MLNTerrainDrawingContext *terrain;
 
 #if MLN_RENDER_BACKEND_METAL
 /// The Metal command buffer is used to generate render and other encoders..
