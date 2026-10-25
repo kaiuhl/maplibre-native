@@ -3928,6 +3928,15 @@ static void *windowScreenContext = &windowScreenContext;
   [self setZoomLevel:zoomLevel animated:NO];
 }
 
+- (CLLocationDistance)nearClipDistance {
+  return self.mbglMap.getNearClipDistance().value_or(0);
+}
+
+- (void)setNearClipDistance:(CLLocationDistance)nearClipDistance {
+  MLNLogDebug(@"Setting nearClipDistance: %f", nearClipDistance);
+  self.mbglMap.setNearClipDistance(nearClipDistance);
+}
+
 - (void)setZoomLevel:(double)zoomLevel animated:(BOOL)animated {
   MLNLogDebug(@"Setting zoomLevel: %f animated: %@", zoomLevel, MLNStringFromBOOL(animated));
   if (zoomLevel == self.zoomLevel) return;

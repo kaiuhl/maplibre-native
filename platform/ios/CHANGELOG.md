@@ -4,6 +4,7 @@ MapLibre welcomes participation and contributions from everyone. Please read [`M
 
 ## main
 
+- Add `MLNMapView.nearClipDistance`, which brings the camera's near plane in for a camera close to the ground. By default nothing nearer than a pixel at the map's scale is drawn, which for a camera standing on the ground and looking out can cut the ground at its feet ([#XXXX](https://github.com/maplibre/maplibre-native/pull/XXXX)).
 - Call offline-pack invalidation completion after the database operation finishes and propagate its errors.
 
 ## 7.0.0-pre2

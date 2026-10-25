@@ -1060,6 +1060,18 @@ of north, the map will automatically snap to exact north.
 - (void)setZoomLevel:(double)zoomLevel animated:(BOOL)animated;
 
 /**
+ The nearest the camera draws, in meters, or 0 for the default.
+
+ By default nothing nearer the camera than a pixel at the map's scale is drawn.
+ For a camera close to the ground, such as one standing on it and looking out,
+ that can be many meters and cut the ground at its feet. Set this to bring the
+ near plane in; it never pushes it out. A nearer near plane costs depth precision
+ far away, so set it no nearer than needed, such as half the camera's height
+ above the ground.
+ */
+@property (nonatomic) CLLocationDistance nearClipDistance;
+
+/**
  * The minimum zoom level at which the map can be shown.
  *
  * Depending on the map view’s aspect ratio, the map view may be prevented
