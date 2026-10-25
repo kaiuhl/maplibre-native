@@ -617,6 +617,33 @@
                  @"Enabling placement transitions should be NO.");
 }
 
+- (void)testTerrain {
+  XCTAssertNil(self.style.terrainSourceIdentifier, @"A style with no terrain should be flat.");
+  XCTAssertEqual(self.style.terrainExaggeration, 1);
+
+  self.style.terrainExaggeration = 2;
+  XCTAssertNil(self.style.terrainSourceIdentifier,
+               @"Setting the exaggeration should not add a terrain.");
+  XCTAssertEqual(self.style.terrainExaggeration, 1);
+
+  MLNRasterDEMSource *source = [[MLNRasterDEMSource alloc] initWithIdentifier:@"dem"
+                                                             tileURLTemplates:@[]
+                                                                      options:nil];
+  [self.style addSource:source];
+  self.style.terrainSourceIdentifier = @"dem";
+  XCTAssertEqualObjects(self.style.terrainSourceIdentifier, @"dem");
+  XCTAssertEqual(self.style.terrainExaggeration, 1);
+
+  self.style.terrainExaggeration = 1.5;
+  XCTAssertEqualObjects(self.style.terrainSourceIdentifier, @"dem",
+                        @"Setting the exaggeration should keep the source.");
+  XCTAssertEqual(self.style.terrainExaggeration, 1.5);
+
+  self.style.terrainSourceIdentifier = nil;
+  XCTAssertNil(self.style.terrainSourceIdentifier);
+  XCTAssertEqual(self.style.terrainExaggeration, 1);
+}
+
 - (void)testStyleJSON {
   // Test getting style JSON
   NSString *styleJSON = self.style.styleJSON;
