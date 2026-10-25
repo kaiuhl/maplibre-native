@@ -1,0 +1,184 @@
+{
+  "version": 8,
+  "metadata": {
+    "test": {
+      "width": 256,
+      "height": 256
+    }
+  },
+  "center": [
+    -67.5,
+    52
+  ],
+  "zoom": 4.5,
+  "sources": {
+    "geojson": {
+      "type": "geojson",
+      "data": {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "offset": [
+                0,
+                1
+              ]
+            },
+            "geometry": {
+              "type": "LineString",
+              "coordinates": [
+                [
+                  -73,
+                  52.4
+                ],
+                [
+                  -72.318,
+                  52.554
+                ],
+                [
+                  -71.595,
+                  52.515
+                ],
+                [
+                  -70.966,
+                  52.74
+                ],
+                [
+                  -70.24,
+                  52.74
+                ],
+                [
+                  -69.582,
+                  52.93
+                ],
+                [
+                  -68.867,
+                  52.852
+                ],
+                [
+                  -68.238,
+                  53.077
+                ],
+                [
+                  -67.515,
+                  53.116
+                ],
+                [
+                  -66.833,
+                  53.27
+                ],
+                [
+                  -66.11,
+                  53.231
+                ],
+                [
+                  -65.481,
+                  53.456
+                ],
+                [
+                  -64.755,
+                  53.456
+                ]
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "offset": [
+                0,
+                -1
+              ]
+            },
+            "geometry": {
+              "type": "LineString",
+              "coordinates": [
+                [
+                  -73,
+                  48.9
+                ],
+                [
+                  -72.318,
+                  49.054
+                ],
+                [
+                  -71.595,
+                  49.015
+                ],
+                [
+                  -70.966,
+                  49.24
+                ],
+                [
+                  -70.24,
+                  49.24
+                ],
+                [
+                  -69.582,
+                  49.43
+                ],
+                [
+                  -68.867,
+                  49.352
+                ],
+                [
+                  -68.238,
+                  49.577
+                ],
+                [
+                  -67.515,
+                  49.616
+                ],
+                [
+                  -66.833,
+                  49.77
+                ],
+                [
+                  -66.11,
+                  49.731
+                ],
+                [
+                  -65.481,
+                  49.956
+                ],
+                [
+                  -64.755,
+                  49.956
+                ]
+              ]
+            }
+          }
+        ]
+      }
+    }
+  },
+  "glyphs": "local://glyphs/{fontstack}/{range}.pbf",
+  "layers": [
+    {
+      "id": "line",
+      "type": "line",
+      "source": "geojson"
+    },
+    {
+      "id": "text",
+      "type": "symbol",
+      "source": "geojson",
+      "layout": {
+        "symbol-placement": "line-center",
+        "text-allow-overlap": true,
+        "text-ignore-placement": true,
+        "text-field": "Creek Trail",
+        "text-font": [
+          "Open Sans Semibold",
+          "Arial Unicode MS Bold"
+        ],
+        "text-max-angle": 90,
+        "text-offset": [
+          "get",
+          "offset"
+        ]
+      }
+    }
+  ]
+}
