@@ -8,6 +8,7 @@
 
 ### 🐞 Bug fixes
 
+- With 3D terrain, the ring of tiles added around the terrain's tile cover no longer overlaps tiles of another zoom in it. Overlapping tiles drew a coarse surface through the fine one at steep pitches, and draped custom layers drew a band where the two crossed ([#XXXX](https://github.com/maplibre/maplibre-native/pull/XXXX)).
 - With 3D terrain on and the centre clamp enabled, the clamp no longer cancels a running camera animation; the camera is anchored to the ground once the animation ends ([#4768](https://github.com/maplibre/maplibre-native/pull/4768)).
 
 ## 13.7.1

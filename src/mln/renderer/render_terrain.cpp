@@ -84,6 +84,51 @@ RenderTerrain::RenderTerrain(Immutable<style::Terrain::Impl> impl_)
 
 RenderTerrain::~RenderTerrain() = default;
 
+std::set<UnwrappedTileID> RenderTerrain::dilateMeshCover(const std::set<UnwrappedTileID>& cover) {
+    // Every 8-neighbour of every cover tile, at that tile's zoom
+    std::vector<UnwrappedTileID> ring;
+    for (const auto& id : cover) {
+        const int32_t numTiles = 1 << id.canonical.z;
+        for (int dy = -1; dy <= 1; ++dy) {
+            for (int dx = -1; dx <= 1; ++dx) {
+                if (dx == 0 && dy == 0) continue;
+                const int ny = static_cast<int>(id.canonical.y) + dy;
+                if (ny < 0 || ny >= numTiles) continue; // nothing past the poles
+                int nx = static_cast<int>(id.canonical.x) + dx;
+                int nwrap = id.wrap;
+                if (nx < 0) {
+                    nx += numTiles;
+                    --nwrap;
+                } else if (nx >= numTiles) {
+                    nx -= numTiles;
+                    ++nwrap;
+                }
+                ring.emplace_back(
+                    static_cast<int16_t>(nwrap),
+                    CanonicalTileID(id.canonical.z, static_cast<uint32_t>(nx), static_cast<uint32_t>(ny)));
+            }
+        }
+    }
+    // A cover with an LOD is mixed-zoom, so a neighbour can lie inside a shallower cover tile or
+    // over deeper ones. The terrain draws every mesh tile whole, so two that overlap draw two
+    // surfaces in one place, the coarser poking through the finer wherever it stands higher. Only
+    // neighbours that overlap nothing already kept join; deeper ones first, so where neighbours
+    // of two zooms overlap, the finer is kept.
+    std::sort(ring.begin(), ring.end(), [](const UnwrappedTileID& a, const UnwrappedTileID& b) {
+        return a.canonical.z != b.canonical.z ? a.canonical.z > b.canonical.z : a < b;
+    });
+    std::set<UnwrappedTileID> out = cover;
+    for (const auto& id : ring) {
+        const bool overlaps = std::any_of(out.begin(), out.end(), [&](const UnwrappedTileID& kept) {
+            return kept == id || id.isChildOf(kept) || kept.isChildOf(id);
+        });
+        if (!overlaps) {
+            out.insert(id);
+        }
+    }
+    return out;
+}
+
 std::set<UnwrappedTileID> RenderTerrain::computeMeshCover(
     const TransformState& state, const std::shared_ptr<UpdateParameters>& updateParameters) const {
     std::set<UnwrappedTileID> out;
@@ -132,35 +177,15 @@ std::set<UnwrappedTileID> RenderTerrain::computeMeshCover(
     // whose (sea-level) ancestor intersects the frustum, so a frontier tile whose terrain
     // rises into view but whose flat ancestor was culled is never even visited - it stays
     // out of the cover, and the terrain draws a skirt with nothing behind it, until a
-    // camera nudge shifts the frustum and pulls it in. Add every 8-neighbour of the cover,
+    // camera nudge shifts the frustum and pulls it in. Add every 8-neighbour of the cover
+    // that overlaps none of it (dilateMeshCover),
     // then keep only those whose elevation-extended bounds still intersect the frustum
     // (frustumCull, using the DEM provider's conservative fallback range for the
     // not-yet-loaded neighbours). The elevation sign decides which neighbours survive, so
     // this is correct for terrain above OR below sea level (bathymetry) without hardcoding
     // a direction; the frustum trim stops it from tripling the cover like a blind ring
     // would. Drop the frustumCull line to fall back to a pure uniform 1-ring dilation.
-    std::set<UnwrappedTileID> dilated = out;
-    for (const auto& id : out) {
-        const int32_t numTiles = 1 << id.canonical.z;
-        for (int dy = -1; dy <= 1; ++dy) {
-            for (int dx = -1; dx <= 1; ++dx) {
-                if (dx == 0 && dy == 0) continue;
-                const int ny = static_cast<int>(id.canonical.y) + dy;
-                if (ny < 0 || ny >= numTiles) continue; // nothing past the poles
-                int nx = static_cast<int>(id.canonical.x) + dx;
-                int nwrap = id.wrap;
-                if (nx < 0) {
-                    nx += numTiles;
-                    --nwrap;
-                } else if (nx >= numTiles) {
-                    nx -= numTiles;
-                    ++nwrap;
-                }
-                dilated.emplace(static_cast<int16_t>(nwrap),
-                                CanonicalTileID(id.canonical.z, static_cast<uint32_t>(nx), static_cast<uint32_t>(ny)));
-            }
-        }
-    }
+    std::set<UnwrappedTileID> dilated = dilateMeshCover(out);
     if (dilated.size() != out.size()) {
         out = util::frustumCull(coverParams, dilated);
     }

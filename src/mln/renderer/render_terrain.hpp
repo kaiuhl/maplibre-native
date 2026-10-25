@@ -76,6 +76,10 @@ public:
     std::set<UnwrappedTileID> computeMeshCover(const TransformState& state,
                                                const std::shared_ptr<UpdateParameters>& updateParameters) const;
 
+    /// `cover` and its one-ring: every 8-neighbour of each tile at that tile's zoom, less those
+    /// that would overlap a tile already in it, so the mesh never holds two tiles of one place.
+    static std::set<UnwrappedTileID> dilateMeshCover(const std::set<UnwrappedTileID>& cover);
+
     /// The point the mesh-tile cap measures distance from, in normalized web-mercator [0, 1]:
     /// the ground under the camera (the map centre when the map is not tilted).
     static std::array<double, 2> meshTileCapOrigin(const TransformState& state);
