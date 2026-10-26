@@ -61,7 +61,14 @@ public:
 
     void bind() override {
         assert(context.getBackend().getCommandQueue());
-        commandBuffer = NS::RetainPtr(context.getBackend().getCommandQueue()->commandBuffer());
+        {
+            // commandBuffer() returns an autoreleased buffer. A buffer counts against the queue's
+            // in-flight limit until it is freed, and nothing drains a pool on this thread, so
+            // without this pool each one bound here lives forever and commandBuffer() blocks
+            // once the queue's 64 slots are used up.
+            const auto pool = NS::TransferPtr(NS::AutoreleasePool::alloc()->init());
+            commandBuffer = NS::RetainPtr(context.getBackend().getCommandQueue()->commandBuffer());
+        }
         colorTexture->create();
 
         renderPassDescriptor = NS::TransferPtr(MTL::RenderPassDescriptor::alloc()->init());

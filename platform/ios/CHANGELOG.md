@@ -4,6 +4,7 @@ MapLibre welcomes participation and contributions from everyone. Please read [`M
 
 ## main
 
+- Metal: free each offscreen render pass's command buffer once the pass is done. They were autoreleased with no pool to drain them, so after 64 offscreen passes (hillshade, heatmap and other render targets) the command queue ran out of buffers and rendering hung.
 - Call offline-pack invalidation completion after the database operation finishes and propagate its errors.
 
 ## 7.0.0-pre2

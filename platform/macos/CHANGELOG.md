@@ -4,6 +4,7 @@ MapLibre welcomes participation and contributions from everyone. Please read [`C
 
 ## main
 
+- Metal: free each offscreen render pass's command buffer once the pass is done. They were autoreleased with no pool to drain them, so after 64 offscreen passes (hillshade, heatmap and other render targets) the command queue ran out of buffers and rendering hung.
 - 💥 Breaking: Replace the `Mapbox.h` umbrella header with `MapLibre.h`. `MapLibre.xcframework` no longer ships `Mapbox.h` ([#4731](https://github.com/maplibre/maplibre-native/pull/4731)).
 
   <details>
