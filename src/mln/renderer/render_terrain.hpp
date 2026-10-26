@@ -302,10 +302,22 @@ public:
     std::vector<DrawnTile> getDrawnTiles() const;
 
     /**
-     * @brief A 1x1 zero-elevation DEM texture bound when no DEM tile is available,
+     * @brief A 1x1 DEM texture at sea level, bound when no DEM tile is available,
      * so shaders that declare the DEM sampler always have a valid binding
      */
-    const std::shared_ptr<gfx::Texture2D>& getPlaceholderDEMTexture(gfx::Context&);
+    const std::shared_ptr<gfx::Texture2D>& getPlaceholderDEMTexture(gfx::Context& context) {
+        return getFlatDEMTexture(context, 0.0f);
+    }
+
+    /// The pixel that `unpack` (DEMData::getUnpackVector) decodes to `metres`. All-zero bytes
+    /// are no height at all: -10000 m in Terrain-RGB and -32768 m in Terrarium.
+    static std::array<uint8_t, 4> encodeDEMHeight(const std::array<float, 4>& unpack, float metres);
+
+    /// Height in metres, unexaggerated, to draw a mesh tile flat at while neither its DEM nor an
+    /// ancestor's has loaded: the mean of what `index` has loaded over the tile and half a tile
+    /// around it (neighbours, or the children a zoom-out leaves), else sea level. Drawn at sea
+    /// level or below, a tile among mountains is a pit whose walls are its neighbours' skirts.
+    static float standInElevation(const TerrainElevationIndex* index, const UnwrappedTileID& tileID);
 
     /**
      * @brief Get the terrain implementation
@@ -508,8 +520,11 @@ private:
     void updateInstancedDepthUBO(PaintParameters&);
 #endif
 
-    // See getPlaceholderDEMTexture
-    std::shared_ptr<gfx::Texture2D> placeholderDEMTexture;
+    /// A 1x1 DEM texture decoding to `metres` in the source's encoding (getPlaceholderDEMTexture,
+    /// standInElevation)
+    const std::shared_ptr<gfx::Texture2D>& getFlatDEMTexture(gfx::Context&, float metres);
+    /// getFlatDEMTexture's textures, keyed by their pixel
+    std::unordered_map<uint32_t, std::shared_ptr<gfx::Texture2D>> flatDEMTextures;
 
     // Layer index (terrain renders early in 3D pass, use negative index)
     static constexpr int32_t TERRAIN_LAYER_INDEX = -1000;

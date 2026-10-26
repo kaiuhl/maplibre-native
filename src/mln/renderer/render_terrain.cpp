@@ -542,10 +542,10 @@ void RenderTerrain::update(RenderOrchestrator& orchestrator,
                 }
             }
             if (!demTexture) {
-                // No DEM at all yet: render the mesh flat with the placeholder
-                // DEM so the draped map still shows (a briefly flat area is
-                // less jarring than a hole in the terrain)
-                demTexture = getPlaceholderDEMTexture(context);
+                // No DEM at all yet: render the mesh flat, at the height loaded around it,
+                // so the draped map still shows (a briefly flat area is less jarring than a
+                // hole in the terrain)
+                demTexture = getFlatDEMTexture(context, standInElevation(elevationIndex.get(), unwrapped));
                 if (!demTexture) {
                     continue;
                 }
@@ -961,17 +961,61 @@ std::optional<RenderTerrain::TerrainData> RenderTerrain::getTerrainData(const Un
     };
 }
 
-const std::shared_ptr<gfx::Texture2D>& RenderTerrain::getPlaceholderDEMTexture(gfx::Context& context) {
-    if (!placeholderDEMTexture) {
-        auto image = std::make_shared<PremultipliedImage>(Size{1, 1});
-        std::memset(image->data.get(), 0, image->bytes());
-        placeholderDEMTexture = context.createTexture2D();
-        placeholderDEMTexture->setImage(image);
-        placeholderDEMTexture->setSamplerConfiguration({.filter = gfx::TextureFilterType::Nearest,
-                                                        .wrapU = gfx::TextureWrapType::Clamp,
-                                                        .wrapV = gfx::TextureWrapType::Clamp});
+std::array<uint8_t, 4> RenderTerrain::encodeDEMHeight(const std::array<float, 4>& unpack, float metres) {
+    // Both encodings weigh R, G and B as 65536, 256 and 1 steps of unpack[2] metres, offset by
+    // unpack[3]: count the steps and split them into bytes
+    const auto steps = std::lround((static_cast<double>(metres) + unpack[3]) / unpack[2]);
+    const auto clamped = static_cast<uint32_t>(std::clamp<long>(steps, 0, 0xFFFFFF));
+    return {{static_cast<uint8_t>(clamped >> 16),
+             static_cast<uint8_t>((clamped >> 8) & 0xFF),
+             static_cast<uint8_t>(clamped & 0xFF),
+             255}};
+}
+
+float RenderTerrain::standInElevation(const TerrainElevationIndex* index, const UnwrappedTileID& tileID) {
+    if (!index) {
+        return 0.0f;
     }
-    return placeholderDEMTexture;
+    // A 5x5 grid from half a tile before the tile to half a tile past it
+    constexpr int samples = 5;
+    const double tiles = static_cast<double>(1u << tileID.canonical.z);
+    double sum = 0.0;
+    int hits = 0;
+    for (int j = 0; j < samples; ++j) {
+        for (int i = 0; i < samples; ++i) {
+            const double worldX = tileID.canonical.x + tileID.wrap * tiles - 0.5 + 2.0 * i / (samples - 1);
+            const double worldY = std::clamp(tileID.canonical.y - 0.5 + 2.0 * j / (samples - 1), 0.0, tiles);
+            const LatLng latLng = Projection::unproject(
+                {worldX / tiles * util::tileSize_D, worldY / tiles * util::tileSize_D}, 1.0, LatLng::Unwrapped);
+            if (const auto height = index->getElevation(latLng)) {
+                sum += *height;
+                ++hits;
+            }
+        }
+    }
+    const float exaggeration = index->getExaggeration();
+    return hits && exaggeration > 0.0f ? static_cast<float>(sum / hits / exaggeration) : 0.0f;
+}
+
+const std::shared_ptr<gfx::Texture2D>& RenderTerrain::getFlatDEMTexture(gfx::Context& context, float metres) {
+    const auto pixel = encodeDEMHeight(demUnpackVector, metres);
+    const uint32_t key = (pixel[0] << 16) | (pixel[1] << 8) | pixel[2];
+    if (const auto found = flatDEMTextures.find(key); found != flatDEMTextures.end()) {
+        return found->second;
+    }
+    // One texture a height, for the few tiles waiting on their DEM at once; drawables hold
+    // their own references, so dropping the lot when it grows frees only unused ones
+    if (flatDEMTextures.size() >= 64) {
+        flatDEMTextures.clear();
+    }
+    auto image = std::make_shared<PremultipliedImage>(Size{1, 1});
+    std::memcpy(image->data.get(), pixel.data(), pixel.size());
+    auto texture = context.createTexture2D();
+    texture->setImage(image);
+    texture->setSamplerConfiguration({.filter = gfx::TextureFilterType::Nearest,
+                                      .wrapU = gfx::TextureWrapType::Clamp,
+                                      .wrapV = gfx::TextureWrapType::Clamp});
+    return flatDEMTextures.emplace(key, std::move(texture)).first->second;
 }
 
 void RenderTerrain::renderDepth(RenderOrchestrator& orchestrator,
