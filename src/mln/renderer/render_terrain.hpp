@@ -192,7 +192,9 @@ public:
      * @brief Exaggerated height (metres) of the rendered terrain surface at a geographic
      * coordinate, sampled from the deepest loaded DEM tile that contains it: rendered tiles and
      * the ancestors retained for elevation lookups alike, so a point outside the rendered cover
-     * still reads its height. Render-thread only.
+     * still reads its height. Where none of those contains it, from the deepest tile in the DEM
+     * source's tile cache that does: the cover leaves out the ground under a camera below the
+     * terrain, which the centre clamp needs to raise it out. Render-thread only.
      *
      * @param latLng the position to sample
      * @return nullopt when terrain is off or no loaded DEM tile covers the point yet

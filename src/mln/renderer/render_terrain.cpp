@@ -102,21 +102,22 @@ float sampleDEM(const DEMData& demData, const DEMSubTileOffset& off, float x, fl
 }
 
 /// Every DEM tile the source currently holds with decoded data - rendered ones and the
-/// ancestors retained for elevation lookups - keyed by unwrapped tile.
+/// ancestors retained for elevation lookups - keyed by unwrapped tile. With `cached`, the tiles in
+/// the source's tile cache instead: ones the cover no longer holds but whose data is still there.
 struct LoadedDEMTile {
     UnwrappedTileID id;
     const DEMData* data;
 };
 
-std::vector<LoadedDEMTile> loadedDEMTiles(const RenderSource* demSource) {
+std::vector<LoadedDEMTile> loadedDEMTiles(const RenderSource* demSource, bool cached = false) {
     std::vector<LoadedDEMTile> out;
     std::unordered_set<UnwrappedTileID> seen;
     // Core builds without RTTI; a raster-dem render source is always a RenderTileSource.
     if (!demSource || demSource->baseImpl->type != style::SourceType::RasterDEM) {
         return out;
     }
-    const auto* tileSource = static_cast<const RenderTileSource*>(demSource);
-    for (const auto& [id, tile] : tileSource->getTilePyramid().getTiles()) {
+    const auto& pyramid = static_cast<const RenderTileSource*>(demSource)->getTilePyramid();
+    for (const auto& [id, tile] : cached ? pyramid.getCache().getTiles() : pyramid.getTiles()) {
         if (!tile || tile->kind != Tile::Kind::RasterDEM) {
             continue;
         }
@@ -922,36 +923,47 @@ std::optional<double> RenderTerrain::getElevationForLatLng(const LatLng& latLng)
     if (!demSource || !isEnabled()) {
         return std::nullopt;
     }
-    // Deepest loaded DEM tile with data that contains the point
-    const LoadedDEMTile* best = nullptr;
-    double bestX = 0;
-    double bestY = 0;
-    const auto loaded = loadedDEMTiles(demSource);
-    for (const auto& candidate : loaded) {
-        const UnwrappedTileID& id = candidate.id;
-        const auto z = static_cast<int32_t>(id.canonical.z);
-        if (best && z <= static_cast<int32_t>(best->id.canonical.z)) {
-            continue;
+    // The height of the deepest of `tiles` that contains the point
+    const auto sampleDeepest = [&](const std::vector<LoadedDEMTile>& tiles) -> std::optional<double> {
+        const LoadedDEMTile* best = nullptr;
+        double bestX = 0;
+        double bestY = 0;
+        for (const auto& candidate : tiles) {
+            const UnwrappedTileID& id = candidate.id;
+            const auto z = static_cast<int32_t>(id.canonical.z);
+            if (best && z <= static_cast<int32_t>(best->id.canonical.z)) {
+                continue;
+            }
+            // The integer-zoom overload projects into tile units (world size 2^z), not pixels.
+            const Point<double> world = Projection::project(latLng, z);
+            const double tilesAcross = std::pow(2.0, z);
+            const double tx = world.x -
+                              (static_cast<double>(id.canonical.x) + static_cast<double>(id.wrap) * tilesAcross);
+            const double ty = world.y - static_cast<double>(id.canonical.y);
+            if (tx < 0.0 || tx >= 1.0 || ty < 0.0 || ty >= 1.0) {
+                continue;
+            }
+            best = &candidate;
+            bestX = tx * util::EXTENT;
+            bestY = ty * util::EXTENT;
         }
-        // The integer-zoom overload projects into tile units (world size 2^z), not pixels.
-        const Point<double> world = Projection::project(latLng, z);
-        const double tilesAcross = std::pow(2.0, z);
-        const double tx = world.x - (static_cast<double>(id.canonical.x) + static_cast<double>(id.wrap) * tilesAcross);
-        const double ty = world.y - static_cast<double>(id.canonical.y);
-        if (tx < 0.0 || tx >= 1.0 || ty < 0.0 || ty >= 1.0) {
-            continue;
+        if (!best) {
+            return std::nullopt;
         }
-        best = &candidate;
-        bestX = tx * util::EXTENT;
-        bestY = ty * util::EXTENT;
+        // Sample the tile just found; getElevation would search the DEM tiles for it again
+        return static_cast<double>(
+            sampleDEM(*best->data, {1.0f, 0.0f, 0.0f}, static_cast<float>(bestX), static_cast<float>(bestY)) *
+            getExaggeration());
+    };
+    if (const auto held = sampleDeepest(loadedDEMTiles(demSource))) {
+        return held;
     }
-    if (!best) {
-        return std::nullopt;
-    }
-    // Sample the tile just found; getElevation would search the DEM tiles for it again
-    return static_cast<double>(
-        sampleDEM(*best->data, {1.0f, 0.0f, 0.0f}, static_cast<float>(bestX), static_cast<float>(bestY)) *
-        getExaggeration());
+    // No tile the source holds for the cover contains the point, but its cache may: the cover
+    // leaves out ground that rises above the camera, so a camera put below the terrain (a centre
+    // at sea level over high ground at a high zoom, when the terrain is turned on or its DEM
+    // arrives) is never shown the ground it is in. The cached tile's height is what lets the
+    // clamp raise the camera out of it (Map::setCenterClampedToGround).
+    return sampleDeepest(loadedDEMTiles(demSource, true));
 }
 
 std::vector<RenderTerrain::DrawnTile> RenderTerrain::getDrawnTiles() const {
