@@ -29,7 +29,8 @@ std::string makeFlatDEMTile() {
     return encodePNG(image);
 }
 
-// A red page draped on terrain whose DEM starts at z9
+// A red polygon over the world, draped on terrain whose DEM starts at z9, on a blue page (the
+// background is drawn under the terrain, not draped)
 constexpr auto drapedStyle = R"({
   "version": 8,
   "sources": {
@@ -40,10 +41,17 @@ constexpr auto drapedStyle = R"({
       "minzoom": 9,
       "maxzoom": 12,
       "tileSize": 64
+    },
+    "land": {
+      "type": "geojson",
+      "data": {"type": "Polygon", "coordinates": [[[-179, -80], [179, -80], [179, 80], [-179, 80], [-179, -80]]]}
     }
   },
   "terrain": {"source": "dem"},
-  "layers": [{"id": "page", "type": "background", "paint": {"background-color": "#ff0000"}}]
+  "layers": [
+    {"id": "page", "type": "background", "paint": {"background-color": "#0000ff"}},
+    {"id": "land", "type": "fill", "source": "land", "paint": {"fill-color": "#ff0000"}}
+  ]
 })";
 
 bool isRed(const PremultipliedImage& image, uint32_t x, uint32_t y) {
