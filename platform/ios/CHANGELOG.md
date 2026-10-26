@@ -4,6 +4,7 @@ MapLibre welcomes participation and contributions from everyone. Please read [`M
 
 ## main
 
+- With 3D terrain, the Balanced terrain load mode draws terrain as far as Quality (64 tiles, not 48). The shorter reach left bare ground along the top edge of a steeply tilted map ([#XXXX](https://github.com/maplibre/maplibre-native/pull/XXXX)).
 - Metal: offscreen render passes (heatmap, hillshade, terrain drapes and the terrain depth pass) no longer block the CPU until the GPU finishes each one; only reading the image back waits ([#XXXX](https://github.com/maplibre/maplibre-native/pull/XXXX)).
 - Hillshade layers shade each DEM tile once and reuse the result, instead of re-running the shading pass for every hillshade tile on every frame. A map with a hillshade layer draws about half as many passes per frame, which on an iPhone with 3D terrain was the difference between about 44 and 60 frames per second ([#XXXX](https://github.com/maplibre/maplibre-native/pull/XXXX)).
 - Add `MLNMapView.terrainLoadMode`, which caps how many new tiles and terrain drape re-renders 3D terrain does in one frame. With many vector layers draped over the terrain, a camera move that re-renders many drapes at once can stall a frame; `MLNTerrainLoadModeBalanced` and `MLNTerrainLoadModePerformance` spread that work over the following frames ([#XXXX](https://github.com/maplibre/maplibre-native/pull/XXXX)).

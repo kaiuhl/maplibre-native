@@ -1,6 +1,7 @@
 #include <mln/test/util.hpp>
 
 #include <mln/map/camera.hpp>
+#include <mln/map/mode.hpp>
 #include <mln/map/transform.hpp>
 #include <mln/renderer/render_terrain.hpp>
 #include <mln/tile/tile_id.hpp>
@@ -132,4 +133,13 @@ TEST(TerrainMeshCover, DilationNeverOverlapsTheCover) {
     EXPECT_TRUE(dilated.contains(UnwrappedTileID(0, CanonicalTileID(4, 7, 4))));
     EXPECT_TRUE(dilated.contains(UnwrappedTileID(0, CanonicalTileID(4, 7, 5))));
     EXPECT_TRUE(dilated.contains(UnwrappedTileID(0, CanonicalTileID(3, 1, 1))));
+}
+
+// Balanced spreads the work over frames but reaches as far as Quality: a shorter cap drops the
+// farthest tiles, which at a steep tilt left bare ground at the top edge of the map.
+TEST(TerrainMeshCover, BalancedReachesAsFarAsQuality) {
+    EXPECT_EQ(terrainLoadBudget(TerrainLoadMode::Quality).maxMeshTiles,
+              terrainLoadBudget(TerrainLoadMode::Balanced).maxMeshTiles);
+    EXPECT_LT(terrainLoadBudget(TerrainLoadMode::Performance).maxMeshTiles,
+              terrainLoadBudget(TerrainLoadMode::Balanced).maxMeshTiles);
 }
