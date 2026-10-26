@@ -236,10 +236,14 @@ public:
     std::optional<TerrainData> getTerrainData(const UnwrappedTileID&) const;
 
     /**
-     * @brief A 1x1 zero-elevation DEM texture bound when no DEM tile is available,
-     * so shaders that declare the DEM sampler always have a valid binding
+     * @brief A 1x1 DEM texture at sea level in the source's encoding, bound when no DEM tile
+     * is available, so shaders that declare the DEM sampler always have a valid binding
      */
     const std::shared_ptr<gfx::Texture2D>& getPlaceholderDEMTexture(gfx::Context&);
+
+    /// The pixel that `unpack` (DEMData::getUnpackVector) decodes to `metres`. All-zero bytes
+    /// are no height at all: -10000 m in Terrain-RGB and -32768 m in Terrarium.
+    static std::array<uint8_t, 4> encodeDEMHeight(const std::array<float, 4>& unpack, float metres);
 
     /**
      * @brief Get the terrain implementation
@@ -437,6 +441,8 @@ private:
 
     // See getPlaceholderDEMTexture
     std::shared_ptr<gfx::Texture2D> placeholderDEMTexture;
+    /// placeholderDEMTexture's pixel, rewritten when the DEM source's encoding changes
+    std::array<uint8_t, 4> placeholderDEMPixel{};
 
     // Layer index (terrain renders early in 3D pass, use negative index)
     static constexpr int32_t TERRAIN_LAYER_INDEX = -1000;

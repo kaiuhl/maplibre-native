@@ -781,10 +781,23 @@ std::optional<RenderTerrain::TerrainData> RenderTerrain::getTerrainData(const Un
     };
 }
 
+std::array<uint8_t, 4> RenderTerrain::encodeDEMHeight(const std::array<float, 4>& unpack, float metres) {
+    // Both encodings weigh R, G and B as 65536, 256 and 1 steps of unpack[2] metres, offset by
+    // unpack[3]: count the steps and split them into bytes
+    const auto steps = std::lround((static_cast<double>(metres) + unpack[3]) / unpack[2]);
+    const auto clamped = static_cast<uint32_t>(std::clamp<long>(steps, 0, 0xFFFFFF));
+    return {{static_cast<uint8_t>(clamped >> 16),
+             static_cast<uint8_t>((clamped >> 8) & 0xFF),
+             static_cast<uint8_t>(clamped & 0xFF),
+             255}};
+}
+
 const std::shared_ptr<gfx::Texture2D>& RenderTerrain::getPlaceholderDEMTexture(gfx::Context& context) {
-    if (!placeholderDEMTexture) {
+    const auto pixel = encodeDEMHeight(demUnpackVector, 0.0f);
+    if (!placeholderDEMTexture || pixel != placeholderDEMPixel) {
+        placeholderDEMPixel = pixel;
         auto image = std::make_shared<PremultipliedImage>(Size{1, 1});
-        std::memset(image->data.get(), 0, image->bytes());
+        std::memcpy(image->data.get(), pixel.data(), pixel.size());
         placeholderDEMTexture = context.createTexture2D();
         placeholderDEMTexture->setImage(image);
         placeholderDEMTexture->setSamplerConfiguration({.filter = gfx::TextureFilterType::Nearest,
