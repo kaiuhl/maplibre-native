@@ -185,15 +185,23 @@ std::set<UnwrappedTileID> RenderTerrain::idealMeshCover(const util::TileCoverPar
     if (overscaledZoom < 0) {
         return out;
     }
-    // Cover at the view's zoom even past the DEM's maxzoom, as maplibre-gl-js does: its
-    // TerrainTileManager covers up to z22 whatever the DEM source's maxzoom, and getSourceTile
-    // clamps only the DEM zoom to source.maxzoom. Clamping the cover to the DEM's maxzoom kept
-    // one 1024 px drape per maxzoom tile, magnified 2^dz times on screen past it. Within the
-    // DEM's zooms the range is unchanged, so the tilted near field may still mesh deeper than
-    // the centre, up to the DEM's maxzoom.
-    const Range<uint8_t> zoomRange{0, static_cast<uint8_t>(std::max<int32_t>(demMaxZoom, overscaledZoom))};
+    // Once the view itself is past the DEM's maxzoom, cover at the view's zoom, as maplibre-gl-js
+    // does: its TerrainTileManager covers up to z22 whatever the DEM source's maxzoom, and
+    // getSourceTile clamps only the DEM zoom to source.maxzoom. Clamping the cover to the DEM's
+    // maxzoom there kept one 1024 px drape per maxzoom tile, magnified 2^dz times on screen.
+    //
+    // Up to the DEM's maxzoom the cover stays clamped to it, as before. The covering zoom runs
+    // ahead of the view's own: a 256 px DEM covers one zoom deeper (z16 at a z15 view, rounded
+    // from z14.5), and a tileLodZoomShift or a tilted near field deeper still. Letting those
+    // past the maxzoom at a view within it nearly tripled the cover at z14.5-15 at the tilt cap
+    // (16 -> 43 tiles on a phone), each a 1024 px drape target to fill, for drapes that were
+    // only ~1.5x magnified.
+    const bool viewPastDEM = coverParams.transformState.getZoom() > static_cast<double>(demMaxZoom);
+    const int32_t maxCoverZoom = viewPastDEM ? std::max<int32_t>(demMaxZoom, overscaledZoom) : demMaxZoom;
+    const Range<uint8_t> zoomRange{0, static_cast<uint8_t>(maxCoverZoom)};
+    const int32_t idealZoom = std::min(maxCoverZoom, overscaledZoom);
     for (const auto& id : util::tileCover(
-             coverParams, static_cast<uint8_t>(overscaledZoom), zoomRange, static_cast<uint8_t>(overscaledZoom))) {
+             coverParams, static_cast<uint8_t>(idealZoom), zoomRange, static_cast<uint8_t>(overscaledZoom))) {
         out.insert(id.toUnwrapped());
     }
     return out;

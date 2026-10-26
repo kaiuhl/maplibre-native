@@ -164,3 +164,56 @@ TEST(TerrainMeshCover, OverzoomedTileUsesItsMaxZoomAncestorDEM) {
     const UnwrappedTileID z15(0, CanonicalTileID(15, 5125, 11375));
     EXPECT_EQ(z15, RenderTerrain::demTileFor(z15, 15));
 }
+
+namespace {
+// The cover as it was before overzooming: clamped to the DEM's maxzoom at every view zoom.
+std::set<UnwrappedTileID> coverClampedToTheDEM(const util::TileCoverParameters& params,
+                                               double zoom,
+                                               uint16_t tileSize,
+                                               uint8_t maxZoom) {
+    std::set<UnwrappedTileID> cover;
+    const int32_t overscaledZoom = util::coveringZoomLevel(zoom, style::SourceType::RasterDEM, tileSize);
+    const auto idealZoom = static_cast<uint8_t>(std::min<int32_t>(maxZoom, overscaledZoom));
+    for (const auto& id :
+         util::tileCover(params, idealZoom, Range<uint8_t>{0, maxZoom}, static_cast<uint8_t>(overscaledZoom))) {
+        cover.insert(id.toUnwrapped());
+    }
+    return cover;
+}
+} // namespace
+
+TEST(TerrainMeshCover, TiltedViewWithinTheDEMZoomsCoversAsBefore) {
+    // Glassing's 256 px DEM covers a zoom deeper than the view (z16 from z14.5), and a tilted
+    // near field or a tileLodZoomShift deeper still. None of that may go past the DEM's maxzoom
+    // while the view itself is within it: on a phone at the tilt cap that nearly tripled the
+    // cover at z14.5-15 (16 -> 43 tiles), each a 1024 px drape, for drapes ~1.5x magnified.
+    for (const auto mode : {TileLodMode::Default, TileLodMode::Adaptive}) {
+        for (const uint16_t tileSize : {uint16_t{256}, uint16_t{512}}) {
+            for (double zoom = 12.0; zoom <= 15.0; zoom += 0.25) {
+                Transform transform;
+                transform.resize({402, 874});
+                transform.jumpTo(
+                    CameraOptions().withCenter(LatLng{45.33, -121.70}).withZoom(zoom).withPitch(54.0).withBearing(45.0));
+                util::TileCoverParameters params{.transformState = transform.getState()};
+                params.tileLodMode = mode;
+                for (const double shift : {0.0, 1.0}) {
+                    const auto cover = RenderTerrain::idealMeshCover(params, zoom + shift, tileSize, demMaxZoom);
+                    ASSERT_FALSE(cover.empty());
+                    EXPECT_EQ(coverClampedToTheDEM(params, zoom + shift, tileSize, demMaxZoom), cover)
+                        << "zoom " << zoom << " shift " << shift << " tile size " << tileSize;
+                    EXPECT_LE(*coverZooms(cover).rbegin(), demMaxZoom);
+                }
+            }
+        }
+    }
+}
+
+TEST(TerrainMeshCover, ViewJustPastTheDEMMaxZoomOverzooms) {
+    // Just past the DEM's maxzoom, the 256 px DEM's z15.25 view covers at z16 (rounded from 16.25).
+    Transform transform;
+    transform.resize({402, 874});
+    transform.jumpTo(CameraOptions().withCenter(LatLng{45.33, -121.70}).withZoom(15.25).withPitch(54.0));
+
+    const util::TileCoverParameters params{.transformState = transform.getState()};
+    EXPECT_EQ(std::set<uint8_t>{16}, coverZooms(RenderTerrain::idealMeshCover(params, 15.25, 256, demMaxZoom)));
+}
