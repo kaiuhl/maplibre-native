@@ -491,6 +491,23 @@ MLN_EXPORT
 // MARK: Tile LOD controls
 
 /**
+ The algorithm that picks the zoom level of each tile the map shows.
+ */
+typedef NS_ENUM(NSUInteger, MLNTileLodMode) {
+  /** One zoom level for the whole view, finest around the center of the map. */
+  MLNTileLodModeDefault = 0,
+  /** Finer near the camera and coarser away from it, past `tileLodPitchThreshold`. */
+  MLNTileLodModeDistance,
+  /**
+   A zoom level per tile from the field of view, finer near the camera and coarser toward
+   the horizon at every pitch, as MapLibre GL JS picks tiles whenever 3D terrain is on.
+   With 3D terrain, a camera standing on the ground looks out with the center of the map
+   kilometres away, and only this mode keeps the ground at its feet fine.
+   */
+  MLNTileLodModeAdaptive,
+};
+
+/**
  Camera based tile level of detail controls
 
  Minimum radius around the view point in unit of tiles in which the fine
@@ -531,6 +548,15 @@ MLN_EXPORT
  average It is recommended to first configure the pixelRatio before adjusting TileLodZoomShift.
  */
 @property (nonatomic, assign) double tileLodZoomShift;
+
+/**
+ Camera based tile level of detail controls
+
+ The algorithm that picks each tile's zoom level. The default is `MLNTileLodModeDefault`.
+ `MLNTileLodModeDistance` observes `tileLodScale` and `tileLodPitchThreshold`;
+ `MLNTileLodModeAdaptive` observes none of the settings above.
+ */
+@property (nonatomic, assign) MLNTileLodMode tileLodMode;
 
 /**
  Frustum offset used to disable rendering of elements at the edge of the screen
