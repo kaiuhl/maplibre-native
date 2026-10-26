@@ -19,6 +19,7 @@ MapLibre welcomes participation and contributions from everyone. Please read [`M
 - Add `MLNStyle.terrainSourceIdentifier` and `MLNStyle.terrainExaggeration`, which turn 3D terrain on, off or change its exaggeration on a loaded style without reloading it, like Android's `Style.setTerrain` ([#XXXX](https://github.com/maplibre/maplibre-native/pull/XXXX)).
 - With 3D terrain on and the centre clamp enabled, the clamp no longer cancels a running camera animation; the camera is anchored to the ground once the animation ends ([#4768](https://github.com/maplibre/maplibre-native/pull/4768)).
 - With 3D terrain, annotation views, the user location view, callouts, line-placed labels and the collision index sit on the terrain surface instead of at sea level, so labels show, hide and overlap where they are drawn and pins on slopes can be selected. `-convertCoordinate:toPointToView:` and `-convertPoint:toCoordinateFromView:` answer on the terrain surface, from a copy of the terrain heights kept on the map side ([#4558](https://github.com/maplibre/maplibre-native/pull/4558)).
+- With 3D terrain, zooming in past the raster-dem source's maxzoom no longer makes the map blurry and blocky. The terrain keeps draping the map at the view's zoom and stretches the deepest elevation tiles under it, as MapLibre GL JS does ([#XXXX](https://github.com/maplibre/maplibre-native/pull/XXXX)).
 
 ## 7.0.0-pre2
 
