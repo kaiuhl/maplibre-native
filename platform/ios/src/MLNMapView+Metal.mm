@@ -40,13 +40,11 @@ public:
       : backend(backend_), delegate([[MLNMapViewImplDelegate alloc] initWithImpl:&backend]) {}
 
   void bind() override {
-    if (!commandQueue) {
-      commandQueue = [mtlView.device newCommandQueue];
-    }
-
+    // The backend's queue, which the offscreen passes (terrain drapes, hillshade) commit to
+    // as well: one queue runs them before the frame that samples them.
     if (!commandBuffer) {
-      commandBuffer = [commandQueue commandBuffer];
-      commandBufferPtr = NS::RetainPtr((__bridge MTL::CommandBuffer*)commandBuffer);
+      commandBufferPtr = NS::RetainPtr(backend.getCommandQueue()->commandBuffer());
+      commandBuffer = (__bridge id<MTLCommandBuffer>)commandBufferPtr.get();
     }
   }
 
@@ -103,7 +101,6 @@ public:
   MLNMapViewImplDelegate* delegate = nil;
   MTKView* mtlView = nil;
   id<MTLCommandBuffer> commandBuffer;
-  id<MTLCommandQueue> commandQueue;
   bool presentsWithTransaction = false;
 
   // Cached last-applied values comparing against MTKView's reflected state round-trips

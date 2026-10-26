@@ -13,9 +13,7 @@ using namespace mtl;
 class MetalRenderableResource final : public mtl::RenderableResource {
 public:
   MetalRenderableResource(MetalBackend& backend)
-      : rendererBackend(backend),
-        commandQueue(NS::TransferPtr(backend.getDevice()->newCommandQueue())),
-        swapchain(NS::TransferPtr(CA::MetalLayer::layer())) {
+      : rendererBackend(backend), swapchain(NS::TransferPtr(CA::MetalLayer::layer())) {
     swapchain->setDevice(backend.getDevice().get());
   }
 
@@ -30,7 +28,8 @@ public:
     auto texSize = mln::Size{static_cast<uint32_t>(swapchain->drawableSize().width),
                              static_cast<uint32_t>(swapchain->drawableSize().height)};
 
-    commandBuffer = NS::TransferPtr(commandQueue->commandBuffer());
+    // The backend's queue, so the offscreen passes run before the frame that samples them.
+    commandBuffer = NS::RetainPtr(rendererBackend.getCommandQueue()->commandBuffer());
     renderPassDescriptor = NS::TransferPtr(MTL::RenderPassDescriptor::renderPassDescriptor());
     renderPassDescriptor->colorAttachments()->object(0)->setTexture(surface->texture());
 
@@ -97,7 +96,6 @@ public:
 
 private:
   MetalBackend& rendererBackend;
-  MTLCommandQueuePtr commandQueue;
   MTLCommandBufferPtr commandBuffer;
   MTLRenderPassDescriptorPtr renderPassDescriptor;
   CAMetalDrawablePtr surface;
