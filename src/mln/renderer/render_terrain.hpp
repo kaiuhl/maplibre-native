@@ -100,10 +100,12 @@ public:
                                                       const std::array<double, 2>& origin);
 
     /// The elevation-aware ideal mesh cover for `zoom` (the frame's LOD-shifted zoom), before
-    /// the one-ring dilation and the tile cap. Past the DEM source's `demMaxZoom` it keeps
-    /// covering at the view's zoom, so each draped tile stays one 1024 px target per view tile
-    /// instead of one maxzoom drape stretched over 2^dz view tiles; the deeper tiles sample the
-    /// maxzoom DEM through `demTileFor`. Returns {} when `zoom` covers below zoom 0.
+    /// the one-ring dilation and the tile cap. Once the view's own zoom (the transform's, before
+    /// any LOD shift) is past the DEM source's `demMaxZoom`, it keeps covering at the view's zoom,
+    /// so each draped tile stays one 1024 px target per view tile instead of one maxzoom drape
+    /// stretched over 2^dz view tiles; the deeper tiles sample the maxzoom DEM through
+    /// `demTileFor`. Up to `demMaxZoom` the cover is clamped to it, whatever the covering zoom.
+    /// Returns {} when `zoom` covers below zoom 0.
     static std::set<UnwrappedTileID> idealMeshCover(const util::TileCoverParameters& coverParams,
                                                     double zoom,
                                                     uint16_t tileSize,
