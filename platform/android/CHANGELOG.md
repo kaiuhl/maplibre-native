@@ -10,6 +10,7 @@
 
 ### 🐞 Bug fixes
 
+- Hillshade layers shade each DEM tile once and reuse the result, instead of re-running the shading pass for every hillshade tile on every frame. A map with a hillshade layer draws about half as many passes per frame, which on an iPhone with 3D terrain was the difference between about 44 and 60 frames per second ([#XXXX](https://github.com/maplibre/maplibre-native/pull/XXXX)).
 - With 3D terrain on and the centre clamp enabled, the clamp no longer cancels a running camera animation; the camera is anchored to the ground once the animation ends ([#4768](https://github.com/maplibre/maplibre-native/pull/4768)).
 
 ## 13.7.1
