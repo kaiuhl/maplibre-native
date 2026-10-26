@@ -99,13 +99,21 @@ public:
 
     void swap() override {
         assert(commandBuffer);
+        // Commit without waiting. Command buffers on one queue run in the order they are
+        // committed, and Metal tracks the texture between them, so the frame that samples this
+        // texture already runs after this pass. Waiting here stalled the CPU on every offscreen
+        // pass in turn: each terrain drape and the terrain depth pass, every frame.
         commandBuffer->commit();
-        commandBuffer->waitUntilCompleted();
-        commandBuffer.reset();
+        committedCommandBuffer = std::move(commandBuffer);
         renderPassDescriptor.reset();
     }
 
     PremultipliedImage readStillImage() {
+        // Reading back on the CPU is the one use that needs the pass finished.
+        if (committedCommandBuffer) {
+            committedCommandBuffer->waitUntilCompleted();
+            committedCommandBuffer.reset();
+        }
         assert(static_cast<Texture2D*>(colorTexture.get())->getMetalTexture());
 
         auto data = std::make_unique<uint8_t[]>(colorTexture->getDataSize());
@@ -143,6 +151,8 @@ private:
     gfx::Texture2DPtr depthTexture;
     gfx::Texture2DPtr stencilTexture;
     MTLCommandBufferPtr commandBuffer;
+    // The last pass committed by swap(), until readStillImage waits for it.
+    MTLCommandBufferPtr committedCommandBuffer;
     MTLRenderPassDescriptorPtr renderPassDescriptor;
 };
 
