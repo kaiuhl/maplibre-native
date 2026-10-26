@@ -62,6 +62,7 @@ RenderingStats& RenderingStats::operator+=(const RenderingStats& r) {
     memUniformBuffers += r.memUniformBuffers;
     stencilClears += r.stencilClears;
     stencilUpdates += r.stencilUpdates;
+    numOffscreenTargetsRendered += r.numOffscreenTargetsRendered;
 
     for (const auto& [sourceLayerID, layerFeatures] : r.frameRenderedFeatures) {
         RenderLayer::Stats::merge(frameRenderedFeatures[sourceLayerID], layerFeatures);
@@ -113,6 +114,7 @@ std::string RenderingStats::toString(std::string_view sep) const {
     optionalStatLine(ss, memUniformBuffers, "memUniformBuffers", sep);
     optionalStatLine(ss, stencilClears, "stencilClears", sep);
     optionalStatLine(ss, stencilUpdates, "stencilUpdates", sep);
+    optionalStatLine(ss, numOffscreenTargetsRendered, "numOffscreenTargetsRendered", sep);
     return ss.str();
 }
 #endif

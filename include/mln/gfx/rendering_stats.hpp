@@ -92,6 +92,10 @@ struct RenderingStats {
     /// Number of stencil buffer updates
     int stencilUpdates = 0;
 
+    /// Number of offscreen render targets rendered, such as hillshade prepare passes. A
+    /// hillshade prepare target renders on its first frame only
+    int numOffscreenTargetsRendered = 0;
+
     struct NDCBound {
         // NDC positive is up/right
         double minX = std::numeric_limits<double>::max();

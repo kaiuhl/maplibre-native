@@ -65,6 +65,9 @@ void RenderTarget::upload(gfx::UploadPass& uploadPass) {
 }
 
 void RenderTarget::render(RenderOrchestrator& orchestrator, const RenderTree& renderTree, PaintParameters& parameters) {
+    if (renderOnce && renderedOnce) {
+        return;
+    }
     parameters.renderPass = parameters.encoder->createRenderPass("render target",
                                                                  {.renderable = *offscreenTexture,
                                                                   .clearColor = Color{0.0f, 0.0f, 0.0f, 1.0f},
@@ -111,6 +114,9 @@ void RenderTarget::render(RenderOrchestrator& orchestrator, const RenderTree& re
 
     parameters.renderPass.reset();
     parameters.encoder->present(*offscreenTexture);
+
+    renderedOnce = true;
+    context.renderingStats().numOffscreenTargetsRendered++;
 
     parameters.scissorRect = prevScissorRect;
 }

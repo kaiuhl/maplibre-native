@@ -4,6 +4,7 @@ MapLibre welcomes participation and contributions from everyone. Please read [`M
 
 ## main
 
+- Hillshade layers run the prepare pass for each DEM tile once and keep the result, instead of re-running it for every hillshade tile on every frame ([#XXXX](https://github.com/maplibre/maplibre-native/pull/XXXX)).
 - Call offline-pack invalidation completion after the database operation finishes and propagate its errors.
 
 ## 7.0.0-pre2

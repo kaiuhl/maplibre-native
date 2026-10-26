@@ -1,5 +1,11 @@
 # Changelog MapLibre Native for Android
 
+## main
+
+### ✨ Features and improvements
+
+- Hillshade layers run the prepare pass for each DEM tile once and keep the result, instead of re-running it for every hillshade tile on every frame ([#XXXX](https://github.com/maplibre/maplibre-native/pull/XXXX)).
+
 ## 13.7.1
 
 ### ✨ Features and improvements

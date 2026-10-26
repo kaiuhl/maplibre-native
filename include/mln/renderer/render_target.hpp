@@ -78,11 +78,17 @@ public:
     /// Render the layer groups
     void render(RenderOrchestrator&, const RenderTree&, PaintParameters&);
 
+    /// Render on the first frame only and keep the texture after, for content that never
+    /// changes once drawn, such as a hillshade tile's prepare pass
+    void setRenderOnce(bool renderOnce_) { renderOnce = renderOnce_; }
+
 protected:
     gfx::Context& context;
     std::unique_ptr<gfx::OffscreenTexture> offscreenTexture;
     using LayerGroupMap = std::map<int32_t, LayerGroupBasePtr>;
     LayerGroupMap layerGroupsByLayerIndex;
+    bool renderOnce = false;
+    bool renderedOnce = false;
 };
 
 } // namespace mln
