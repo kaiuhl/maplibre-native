@@ -96,7 +96,9 @@ public:
     /// any LOD shift) is past the DEM source's `demMaxZoom`, it keeps covering at the view's zoom,
     /// so each draped tile stays one 1024 px target per view tile instead of one maxzoom drape
     /// stretched over 2^dz view tiles; the deeper tiles sample the maxzoom DEM through
-    /// `demTileFor`. Up to `demMaxZoom` the cover is clamped to it, whatever the covering zoom.
+    /// `demTileFor`. That overzoomed cover goes no deeper than round(`zoom`), the covering zoom of
+    /// a 512 px drape tile, whatever the DEM's `tileSize`. Up to `demMaxZoom` the cover is clamped
+    /// to it, whatever the covering zoom.
     /// Returns {} when `zoom` covers below zoom 0.
     static std::set<UnwrappedTileID> idealMeshCover(const util::TileCoverParameters& coverParams,
                                                     double zoom,
