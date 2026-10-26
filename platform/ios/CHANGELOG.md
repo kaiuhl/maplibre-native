@@ -4,6 +4,7 @@ MapLibre welcomes participation and contributions from everyone. Please read [`M
 
 ## main
 
+- With 3D terrain, zoomed out past the lowest zoom the DEM source holds, the map is draped on flat terrain instead of disappearing, and zooming out past it quickly no longer leaves the previous zoom's terrain tiles on screen ([#XXXX](https://github.com/maplibre/maplibre-native/pull/XXXX)).
 - With 3D terrain, a tile that comes into view before its elevation data or a coarser tile's has loaded is drawn flat at the height loaded around it instead of 32 km (Terrarium) or 10 km (Terrain-RGB) underground, which showed as a hole edged with stretched streaks when zooming out over high ground while tiles stream in. Layers placed on the terrain without a DEM tile read sea level for the same reason ([#XXXX](https://github.com/maplibre/maplibre-native/pull/XXXX)).
 - With 3D terrain, the Balanced terrain load mode draws terrain as far as Quality (64 tiles, not 48). The shorter reach left bare ground along the top edge of a steeply tilted map ([#XXXX](https://github.com/maplibre/maplibre-native/pull/XXXX)).
 - Metal: offscreen render passes (heatmap, hillshade, terrain drapes and the terrain depth pass) no longer block the CPU until the GPU finishes each one; only reading the image back waits. The map view draws each frame on the renderer backend's command queue, the one the offscreen passes use, so a frame never samples a pass that has not run ([#XXXX](https://github.com/maplibre/maplibre-native/pull/XXXX)).
