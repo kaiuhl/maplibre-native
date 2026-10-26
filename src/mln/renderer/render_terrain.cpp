@@ -140,6 +140,10 @@ std::vector<LoadedDEMTile> loadedDEMTiles(const RenderSource* demSource, bool ca
     return out;
 }
 
+// The tile size the mesh cover is chosen with past the DEM's maxzoom: the drape target's base
+// tile size (Renderer::Impl::drapeTileSize, the standard 512 px tile), whatever the DEM's own.
+constexpr uint16_t overzoomCoverTileSize = util::tileSize_I;
+
 } // namespace
 
 RenderTerrain::RenderTerrain(Immutable<style::Terrain::Impl> impl_)
@@ -278,6 +282,15 @@ std::set<UnwrappedTileID> RenderTerrain::idealMeshCover(const util::TileCoverPar
     // getSourceTile clamps only the DEM zoom to source.maxzoom. Clamping the cover to the DEM's
     // maxzoom there kept one 1024 px drape per maxzoom tile, magnified 2^dz times on screen.
     //
+    // How deep to go there is set by the drape, not the DEM: past the maxzoom the DEM adds no
+    // detail, so a 256 px DEM's extra zoom only doubles the drapes. Choose that zoom from the
+    // drape's 512 px tile, round(zoom): a 512 pt tile then shows ~1.5x magnified at pixel ratio 3
+    // (1536 px from a 1024 px target), as within the DEM's zooms. Covering from the 256 px DEM
+    // tile, round(zoom + 1), made a z14.5-15 view cover at z16 over a z14 DEM, ~40% more tiles
+    // and 1.5-2x the drape renders. tileCover still gets the DEM's covering zoom as overscaledZ,
+    // so the tilted LOD steps the far field down as the DEM's own cover does; only the near
+    // field's deepest zoom is capped.
+    //
     // Up to the DEM's maxzoom the cover stays clamped to it, as before. The covering zoom runs
     // ahead of the view's own: a 256 px DEM covers one zoom deeper (z16 at a z15 view, rounded
     // from z14.5), and a tileLodZoomShift or a tilted near field deeper still. Letting those
@@ -285,7 +298,8 @@ std::set<UnwrappedTileID> RenderTerrain::idealMeshCover(const util::TileCoverPar
     // (16 -> 43 tiles on a phone), each a 1024 px drape target to fill, for drapes that were
     // only ~1.5x magnified.
     const bool viewPastDEM = coverParams.transformState.getZoom() > static_cast<double>(demMaxZoom);
-    const int32_t maxCoverZoom = viewPastDEM ? std::max<int32_t>(demMaxZoom, overscaledZoom) : demMaxZoom;
+    const int32_t overzoomLevel = util::coveringZoomLevel(zoom, style::SourceType::RasterDEM, overzoomCoverTileSize);
+    const int32_t maxCoverZoom = viewPastDEM ? std::max<int32_t>(demMaxZoom, overzoomLevel) : demMaxZoom;
     const Range<uint8_t> zoomRange{0, static_cast<uint8_t>(maxCoverZoom)};
     const int32_t idealZoom = std::min(maxCoverZoom, overscaledZoom);
     for (const auto& id : util::tileCover(

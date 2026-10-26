@@ -8,6 +8,8 @@
 #include <mln/util/tile_cover.hpp>
 
 #include <set>
+#include <utility>
+#include <vector>
 
 using namespace mln;
 
@@ -249,12 +251,92 @@ TEST(TerrainMeshCover, TiltedViewWithinTheDEMZoomsCoversAsBefore) {
     }
 }
 
-TEST(TerrainMeshCover, ViewJustPastTheDEMMaxZoomOverzooms) {
-    // Just past the DEM's maxzoom, the 256 px DEM's z15.25 view covers at z16 (rounded from 16.25).
-    Transform transform;
-    transform.resize({402, 874});
-    transform.jumpTo(CameraOptions().withCenter(LatLng{45.33, -121.70}).withZoom(15.25).withPitch(54.0));
+TEST(TerrainMeshCover, ViewJustPastTheDEMMaxZoomOverzoomsAtTheRoundedViewZoom) {
+    // Past the DEM's maxzoom the cover zoom comes from the 512 px drape tile, not the 256 px DEM
+    // tile: a z15.25 view stays at z15 (not z16, rounded from 16.25), and z15.6 goes on to z16.
+    for (const auto& [zoom, expected] : {std::pair{15.25, uint8_t{15}}, std::pair{15.6, uint8_t{16}}}) {
+        Transform transform;
+        transform.resize({402, 874});
+        transform.jumpTo(CameraOptions().withCenter(LatLng{45.33, -121.70}).withZoom(zoom).withPitch(54.0));
 
-    const util::TileCoverParameters params{.transformState = transform.getState()};
-    EXPECT_EQ(std::set<uint8_t>{16}, coverZooms(RenderTerrain::idealMeshCover(params, 15.25, 256, demMaxZoom)));
+        const util::TileCoverParameters params{.transformState = transform.getState()};
+        EXPECT_EQ(std::set<uint8_t>{expected},
+                  coverZooms(RenderTerrain::idealMeshCover(params, zoom, 256, demMaxZoom)))
+            << "zoom " << zoom;
+    }
+}
+
+namespace {
+// The phone's own raster-dem source stops at z14, a zoom short of the simulator's.
+constexpr uint8_t phoneDEMMaxZoom = 14;
+
+// The deepest zoom of Glassing's 256 px DEM cover on a 402x874 pt phone over Mt Hood (its x3 pixel
+// ratio leaves the cover, chosen in points, unchanged), looking at `pitch`, for each LOD mode.
+// `covers` gets each mode's cover, and `clamped` the cover clamped to the DEM as it was before.
+std::vector<uint8_t> phoneCoverMaxZooms(double zoom,
+                                        double pitch,
+                                        double shift = 0.0,
+                                        std::vector<std::set<UnwrappedTileID>>* covers = nullptr,
+                                        std::vector<std::set<UnwrappedTileID>>* clamped = nullptr) {
+    std::vector<uint8_t> maxZooms;
+    for (const auto mode : {TileLodMode::Default, TileLodMode::Adaptive}) {
+        Transform transform;
+        transform.resize({402, 874});
+        transform.jumpTo(
+            CameraOptions().withCenter(LatLng{45.37, -121.70}).withZoom(zoom).withPitch(pitch).withBearing(45.0));
+        util::TileCoverParameters params{.transformState = transform.getState()};
+        params.tileLodMode = mode;
+        const auto cover = RenderTerrain::idealMeshCover(params, zoom + shift, 256, phoneDEMMaxZoom);
+        maxZooms.push_back(cover.empty() ? 0 : *coverZooms(cover).rbegin());
+        if (covers) {
+            covers->push_back(cover);
+        }
+        if (clamped) {
+            clamped->push_back(coverClampedToTheDEM(params, zoom + shift, 256, phoneDEMMaxZoom));
+        }
+    }
+    return maxZooms;
+}
+} // namespace
+
+TEST(TerrainMeshCover, PhoneViewAtZ15CoversNoDeeperThanZ15) {
+    // On the phone's z14 DEM a z15 view covered at z16 (round(15 + 1) for the 256 px DEM): ~40%
+    // more tiles and 1.5-2x the drape renders, +0.6 ms GPU on a tilted pan. The drape's 512 px
+    // tile keeps it at z15, overhead and at the 54 deg tilt cap.
+    for (const double pitch : {0.0, 54.0}) {
+        EXPECT_EQ((std::vector<uint8_t>{15, 15}), phoneCoverMaxZooms(15.0, pitch)) << "pitch " << pitch;
+    }
+}
+
+TEST(TerrainMeshCover, PhoneViewJustPastTheDEMCoversAsBefore) {
+    // At z14.4 the view is past the z14 DEM but rounds back to it, so the cover is the one the
+    // engine had before overzooming: clamped to z14.
+    for (const double pitch : {0.0, 54.0}) {
+        std::vector<std::set<UnwrappedTileID>> covers;
+        std::vector<std::set<UnwrappedTileID>> clamped;
+        EXPECT_EQ((std::vector<uint8_t>{14, 14}), phoneCoverMaxZooms(14.4, pitch, 0.0, &covers, &clamped))
+            << "pitch " << pitch;
+        EXPECT_EQ(clamped, covers) << "pitch " << pitch;
+    }
+}
+
+TEST(TerrainMeshCover, PhoneViewAtZ17CoversAtZ17) {
+    // Well past the DEM the cover still follows the view, so z17 stays sharp.
+    for (const double pitch : {0.0, 54.0}) {
+        EXPECT_EQ((std::vector<uint8_t>{17, 17}), phoneCoverMaxZooms(17.0, pitch)) << "pitch " << pitch;
+    }
+    // Overhead the whole cover is at z17.
+    std::vector<std::set<UnwrappedTileID>> covers;
+    phoneCoverMaxZooms(17.0, 0.0, 0.0, &covers);
+    for (const auto& cover : covers) {
+        EXPECT_EQ(std::set<uint8_t>{17}, coverZooms(cover));
+    }
+}
+
+TEST(TerrainMeshCover, PhoneOverzoomFollowsTheLodShift) {
+    // A tileLodZoomShift moves the overzoomed cover by the same amount: z15 shifted by +1 covers
+    // at z16 (round(16)), not z17 (round(16 + 1) for the 256 px DEM).
+    for (const double pitch : {0.0, 54.0}) {
+        EXPECT_EQ((std::vector<uint8_t>{16, 16}), phoneCoverMaxZooms(15.0, pitch, 1.0)) << "pitch " << pitch;
+    }
 }
