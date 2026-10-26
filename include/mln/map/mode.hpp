@@ -69,15 +69,16 @@ struct TerrainLoadBudget {
     /// tiles nearest the camera are kept and the farthest - the horizon tiles a high tilt
     /// pulls in - are dropped. Everything downstream scales with this (mesh draws, drape
     /// targets and re-renders, depth instances), so it is the bluntest frame-time lever - and
-    /// it costs terrain render *distance*, which is why Quality keeps a generous cap rather
-    /// than the aggressive one Performance uses.
+    /// it costs terrain render *distance*, which is why Quality and Balanced keep a generous cap
+    /// rather than the aggressive one Performance uses: Balanced spreads work over frames but
+    /// draws the same ground as Quality.
     size_t maxMeshTiles;
 };
 
 constexpr TerrainLoadBudget terrainLoadBudget(TerrainLoadMode mode) {
     switch (mode) {
         case TerrainLoadMode::Balanced:
-            return {32, 16, 48};
+            return {32, 16, 64};
         case TerrainLoadMode::Performance:
             return {8, 4, 24};
         case TerrainLoadMode::Quality:

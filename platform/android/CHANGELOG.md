@@ -10,6 +10,7 @@
 
 ### 🐞 Bug fixes
 
+- With 3D terrain, the Balanced terrain load mode draws terrain as far as Quality (64 tiles, not 48). The shorter reach left bare ground along the top edge of a steeply tilted map ([#XXXX](https://github.com/maplibre/maplibre-native/pull/XXXX)).
 - With 3D terrain on and the centre clamp enabled, the clamp no longer cancels a running camera animation; the camera is anchored to the ground once the animation ends ([#4768](https://github.com/maplibre/maplibre-native/pull/4768)).
 
 ## 13.7.1
