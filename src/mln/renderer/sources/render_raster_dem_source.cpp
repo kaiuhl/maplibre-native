@@ -105,6 +105,25 @@ std::optional<Range<int32_t>> RenderRasterDEMSource::getNearbyElevationRange(con
     return std::nullopt;
 }
 
+std::optional<std::pair<CanonicalTileID, const DEMData*>> RenderRasterDEMSource::getHeldDEM(
+    const CanonicalTileID& id) const {
+    std::optional<std::pair<CanonicalTileID, const DEMData*>> deepest;
+    const auto search = [&](const std::map<OverscaledTileID, std::unique_ptr<Tile>>& tiles) {
+        for (const auto& [tileID, tile] : tiles) {
+            const CanonicalTileID& canonical = tileID.canonical;
+            if ((deepest && canonical.z <= deepest->first.z) || !(canonical == id || id.isChildOf(canonical))) {
+                continue;
+            }
+            if (const auto* bucket = static_cast<const RasterDEMTile&>(*tile).getBucket()) {
+                deepest.emplace(canonical, &bucket->getDEMData());
+            }
+        }
+    };
+    search(tilePyramid.getTiles());
+    search(tilePyramid.getCache().getTiles());
+    return deepest;
+}
+
 void RenderRasterDEMSource::addElevationRange(const CanonicalTileID& id, const Range<int32_t> range) {
     elevationRanges.insert_or_assign(id, range);
 

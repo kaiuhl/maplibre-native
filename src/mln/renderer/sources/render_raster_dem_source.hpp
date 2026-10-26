@@ -5,9 +5,12 @@
 #include <mln/util/range.hpp>
 
 #include <optional>
+#include <utility>
 #include <unordered_map>
 
 namespace mln {
+
+class DEMData;
 
 class RenderRasterDEMSource final : public RenderTileSetSource {
 public:
@@ -40,6 +43,12 @@ public:
     /// like getElevationRange it changes only when DEM data arrives. nullopt until a tile has
     /// loaded.
     std::optional<Range<int32_t>> getNearbyElevationRange(const CanonicalTileID& id) const;
+
+    /// The DEM of the deepest tile the source holds, in use or cached, that is `id` or an
+    /// ancestor of it, with that tile's id; nullopt when none with data does. Unlike the render
+    /// tiles, this includes a tile the cover leaves out: the ground under a camera that sits
+    /// below it, which is out of view until the camera is raised above it.
+    std::optional<std::pair<CanonicalTileID, const DEMData*>> getHeldDEM(const CanonicalTileID& id) const;
 
 private:
     // RenderTileSetSource overrides

@@ -166,7 +166,8 @@ public:
      *
      * Samples at the depth of the finest DEM tile currently loaded. `getElevation` only
      * matches a DEM tile that is the sample tile or an ancestor of it, so a fixed sample
-     * zoom silently reads 0 wherever the DEM is loaded deeper than that.
+     * zoom silently reads 0 wherever the DEM is loaded deeper than that. Where no drawn
+     * DEM tile covers the position, it reads the deepest one the source still holds.
      *
      * @param latLng the position to sample
      * @return height in metres of the rendered surface, or 0 when no DEM covers it

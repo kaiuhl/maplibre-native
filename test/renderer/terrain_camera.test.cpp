@@ -600,3 +600,45 @@ TEST(TerrainDrape, MasksAreDrawnOnlyForTilesOverlappingTheTarget) {
     EXPECT_LE(counts.drawn, 4 * counts.targets)
         << counts.drawn << " masks over " << counts.targets << " targets, " << counts.skipped << " skipped";
 }
+
+namespace {
+
+constexpr double highGroundMeters = 1500.0;
+
+// Ground higher than the camera of a sea-level centre at z17 stands above it (a few hundred
+// metres in this 256 px viewport), so a centre left at sea level puts the camera inside it.
+void expectCameraAboveTheGround(TerrainCameraTest& test) {
+    EXPECT_NEAR(*test.map.getCameraOptions({}).centerAltitude, highGroundMeters, 5.0);
+    EXPECT_GT(test.eye()[2] / mercatorMetre, highGroundMeters);
+}
+
+} // namespace
+
+// The clamp puts the centre on the ground once the renderer has its height, with nothing else
+// moving the camera: here the DEM under a z17 centre that starts at sea level, below the camera
+// that the ground has swallowed.
+TEST(TerrainCamera, CentreLandsOnTheGroundWhenTheDemLoadsAtHighZoom) {
+    TerrainCameraTest test;
+    test.tile = makeDEMTile(highGroundMeters);
+    test.map.setCenterClampedToGround(true);
+    test.map.jumpTo(CameraOptions().withZoom(17.0).withPitch(45.0).withCenterAltitude(0.0));
+    ASSERT_LT(test.eye()[2] / mercatorMetre, highGroundMeters);
+
+    test.renderAndGetAltitude(8);
+    expectCameraAboveTheGround(test);
+}
+
+// The same when the terrain is turned on over an idle z17 map.
+TEST(TerrainCamera, CentreLandsOnTheGroundWhenTerrainIsEnabledAtHighZoom) {
+    TerrainCameraTest test;
+    test.tile = makeDEMTile(highGroundMeters);
+    test.map.setCenterClampedToGround(true);
+    test.map.getStyle().setTerrain(nullptr);
+    test.map.jumpTo(CameraOptions().withZoom(17.0).withPitch(45.0).withCenterAltitude(0.0));
+    ASSERT_NEAR(test.renderAndGetAltitude(4), 0.0, 0.001);
+    ASSERT_LT(test.eye()[2] / mercatorMetre, highGroundMeters);
+
+    test.map.getStyle().setTerrain(std::make_unique<style::Terrain>("dem"));
+    test.renderAndGetAltitude(8);
+    expectCameraAboveTheGround(test);
+}
