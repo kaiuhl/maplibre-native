@@ -4,6 +4,7 @@ MapLibre welcomes participation and contributions from everyone. Please read [`M
 
 ## main
 
+- Metal: offscreen render passes (hillshade, heatmap and other render targets) no longer block the CPU until the GPU finishes each one; only reading the image back waits. The map view now draws each frame on the renderer backend's command queue, the one the offscreen passes use, so a frame always runs after the passes it samples ([#XXXX](https://github.com/maplibre/maplibre-native/pull/XXXX)).
 - Call offline-pack invalidation completion after the database operation finishes and propagate its errors.
 
 ## 7.0.0-pre2

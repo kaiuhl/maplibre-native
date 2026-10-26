@@ -61,7 +61,14 @@ public:
 
     void bind() override {
         assert(context.getBackend().getCommandQueue());
-        commandBuffer = NS::RetainPtr(context.getBackend().getCommandQueue()->commandBuffer());
+        {
+            // commandBuffer() returns an autoreleased buffer. A buffer counts against the queue's
+            // in-flight limit until it is freed, and nothing drains a pool on this thread, so
+            // without this pool each one bound here lives forever. Once swap stopped waiting,
+            // enough of them pile up in a few dozen frames for commandBuffer() to block.
+            const auto pool = NS::TransferPtr(NS::AutoreleasePool::alloc()->init());
+            commandBuffer = NS::RetainPtr(context.getBackend().getCommandQueue()->commandBuffer());
+        }
         colorTexture->create();
 
         renderPassDescriptor = NS::TransferPtr(MTL::RenderPassDescriptor::alloc()->init());
@@ -85,13 +92,21 @@ public:
 
     void swap() override {
         assert(commandBuffer);
+        // Commit without waiting. Command buffers on one queue run in the order they are
+        // committed, and Metal tracks the texture between them, so the frame that samples this
+        // texture already runs after this pass. Waiting here stalled the CPU on every offscreen
+        // pass in turn: each terrain drape and the terrain depth pass, every frame.
         commandBuffer->commit();
-        commandBuffer->waitUntilCompleted();
-        commandBuffer.reset();
+        committedCommandBuffer = std::move(commandBuffer);
         renderPassDescriptor.reset();
     }
 
     PremultipliedImage readStillImage() {
+        // Reading back on the CPU is the one use that needs the pass finished.
+        if (committedCommandBuffer) {
+            committedCommandBuffer->waitUntilCompleted();
+            committedCommandBuffer.reset();
+        }
         assert(static_cast<Texture2D*>(colorTexture.get())->getMetalTexture());
 
         auto data = std::make_unique<uint8_t[]>(colorTexture->getDataSize());
@@ -129,6 +144,8 @@ private:
     gfx::Texture2DPtr depthTexture;
     gfx::Texture2DPtr stencilTexture;
     MTLCommandBufferPtr commandBuffer;
+    // The last pass committed by swap(), until readStillImage waits for it.
+    MTLCommandBufferPtr committedCommandBuffer;
     MTLRenderPassDescriptorPtr renderPassDescriptor;
 };
 
