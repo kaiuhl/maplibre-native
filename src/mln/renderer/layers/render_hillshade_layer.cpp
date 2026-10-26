@@ -265,6 +265,10 @@ void RenderHillshadeLayer::update(gfx::ShaderRegistry& shaders,
             if (!renderTarget) {
                 continue;
             }
+            // The prepare pass reads only this tile's DEM, so its output never changes: render it
+            // once and keep the texture. A backfilled border clears renderTargetPrepared and so
+            // gets a fresh target.
+            renderTarget->setRenderOnce(true);
             bucket.renderTarget = renderTarget;
             bucket.renderTargetPrepared = true;
 

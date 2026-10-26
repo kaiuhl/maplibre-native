@@ -458,6 +458,9 @@ RenderTarget::RenderResult RenderTarget::render(RenderOrchestrator& orchestrator
     if (renderOnce) {
         renderedOnce = true;
     }
+    if (!drapeTileID) {
+        context.renderingStats().numOffscreenTargetsRendered++;
+    }
 
     // This target now holds valid content, so it may be deferred by the drape budget later.
     hasRenderedContent = true;
