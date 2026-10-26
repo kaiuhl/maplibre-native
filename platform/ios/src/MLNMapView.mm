@@ -3240,6 +3240,33 @@ static void *windowScreenContext = &windowScreenContext;
   return _mbglMap->getTileLodZoomShift();
 }
 
+- (void)setTerrainLoadMode:(MLNTerrainLoadMode)terrainLoadMode {
+  switch (terrainLoadMode) {
+    case MLNTerrainLoadModeQuality:
+      _mbglMap->setTerrainLoadMode(mln::TerrainLoadMode::Quality);
+      break;
+    case MLNTerrainLoadModeBalanced:
+      _mbglMap->setTerrainLoadMode(mln::TerrainLoadMode::Balanced);
+      break;
+    case MLNTerrainLoadModePerformance:
+      _mbglMap->setTerrainLoadMode(mln::TerrainLoadMode::Performance);
+      break;
+  }
+  [self setNeedsRerender];
+}
+
+- (MLNTerrainLoadMode)terrainLoadMode {
+  switch (_mbglMap->getTerrainLoadMode()) {
+    case mln::TerrainLoadMode::Balanced:
+      return MLNTerrainLoadModeBalanced;
+    case mln::TerrainLoadMode::Performance:
+      return MLNTerrainLoadModePerformance;
+    case mln::TerrainLoadMode::Quality:
+      return MLNTerrainLoadModeQuality;
+  }
+  return MLNTerrainLoadModeQuality;
+}
+
 - (void)setFrustumOffset:(UIEdgeInsets)frustumOffset {
   _mbglMap->setFrustumOffset(MLNEdgeInsetsFromNSEdgeInsets(frustumOffset));
 }

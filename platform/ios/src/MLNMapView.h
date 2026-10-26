@@ -491,6 +491,24 @@ MLN_EXPORT
 // MARK: Tile LOD controls
 
 /**
+ How much drawing work 3D terrain does in one frame as new tiles come into view.
+ */
+typedef NS_ENUM(NSUInteger, MLNTerrainLoadMode) {
+  /**
+   No per-frame budget: every tile and terrain drape that comes into view is built in the
+   frame it appears. Sharpest, but a frame can stall on a large burst.
+   */
+  MLNTerrainLoadModeQuality = 0,
+  /** Up to 32 new tiles and 16 terrain drape re-renders a frame; the rest follow. */
+  MLNTerrainLoadModeBalanced,
+  /**
+   Up to 8 new tiles and 4 terrain drape re-renders a frame, and fewer terrain tiles
+   toward the horizon. Smoothest on weaker GPUs, with the most progressive fill-in.
+   */
+  MLNTerrainLoadModePerformance,
+};
+
+/**
  Camera based tile level of detail controls
 
  Minimum radius around the view point in unit of tiles in which the fine
@@ -531,6 +549,15 @@ MLN_EXPORT
  average It is recommended to first configure the pixelRatio before adjusting TileLodZoomShift.
  */
 @property (nonatomic, assign) double tileLodZoomShift;
+
+/**
+ How much drawing work 3D terrain does in one frame. The default is
+ `MLNTerrainLoadModeQuality`. With many vector layers draped over the terrain, each drape
+ that re-renders is a full draw of those layers into a texture, and a camera move that
+ changes many at once can stall a frame; the other modes spread that work over the frames
+ that follow, showing the earlier drape until each catches up.
+ */
+@property (nonatomic, assign) MLNTerrainLoadMode terrainLoadMode;
 
 /**
  Frustum offset used to disable rendering of elements at the edge of the screen
