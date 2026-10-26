@@ -102,7 +102,6 @@ std::set<UnwrappedTileID> RenderTerrain::computeMeshCover(
     // undersamples the DEM, aliasing the relief into waves on the fixed 128x128 mesh. Still the
     // elevation-aware ideal cover from the view, not the DEM's loaded tile set.
     const uint16_t terrainCoverTileSize = demSource->getTileSize();
-    const Range<uint8_t> zoomRange{0, demSource->getMaxZoom()};
 
     // LOD parameters from the frame drive the same near-high/far-low zoom
     // selection every other source uses, so the near field drapes at a higher
@@ -118,14 +117,9 @@ std::set<UnwrappedTileID> RenderTerrain::computeMeshCover(
     }
 
     const double zoom = util::clamp<double>(state.getZoom() + zoomShift, state.getMinZoom(), state.getMaxZoom());
-    const int32_t overscaledZoom = util::coveringZoomLevel(zoom, style::SourceType::RasterDEM, terrainCoverTileSize);
-    if (overscaledZoom < static_cast<int32_t>(zoomRange.min)) {
+    out = idealMeshCover(coverParams, zoom, terrainCoverTileSize, demSource->getMaxZoom());
+    if (out.empty()) {
         return out;
-    }
-    const int32_t idealZoom = std::min<int32_t>(zoomRange.max, overscaledZoom);
-    for (const auto& id : util::tileCover(
-             coverParams, static_cast<uint8_t>(idealZoom), zoomRange, static_cast<uint8_t>(overscaledZoom))) {
-        out.insert(id.toUnwrapped());
     }
 
     // One-ring cover dilation. tileCover is a top-down DFS that only descends into tiles
@@ -180,6 +174,36 @@ std::set<UnwrappedTileID> RenderTerrain::computeMeshCover(
                                meshTileCapOrigin(state));
     }
     return out;
+}
+
+std::set<UnwrappedTileID> RenderTerrain::idealMeshCover(const util::TileCoverParameters& coverParams,
+                                                        double zoom,
+                                                        uint16_t tileSize,
+                                                        uint8_t demMaxZoom) {
+    std::set<UnwrappedTileID> out;
+    const int32_t overscaledZoom = util::coveringZoomLevel(zoom, style::SourceType::RasterDEM, tileSize);
+    if (overscaledZoom < 0) {
+        return out;
+    }
+    // Cover at the view's zoom even past the DEM's maxzoom, as maplibre-gl-js does: its
+    // TerrainTileManager covers up to z22 whatever the DEM source's maxzoom, and getSourceTile
+    // clamps only the DEM zoom to source.maxzoom. Clamping the cover to the DEM's maxzoom kept
+    // one 1024 px drape per maxzoom tile, magnified 2^dz times on screen past it. Within the
+    // DEM's zooms the range is unchanged, so the tilted near field may still mesh deeper than
+    // the centre, up to the DEM's maxzoom.
+    const Range<uint8_t> zoomRange{0, static_cast<uint8_t>(std::max<int32_t>(demMaxZoom, overscaledZoom))};
+    for (const auto& id : util::tileCover(
+             coverParams, static_cast<uint8_t>(overscaledZoom), zoomRange, static_cast<uint8_t>(overscaledZoom))) {
+        out.insert(id.toUnwrapped());
+    }
+    return out;
+}
+
+UnwrappedTileID RenderTerrain::demTileFor(const UnwrappedTileID& meshTile, uint8_t demMaxZoom) {
+    if (meshTile.canonical.z <= demMaxZoom) {
+        return meshTile;
+    }
+    return {meshTile.wrap, meshTile.canonical.scaledTo(demMaxZoom)};
 }
 
 std::array<double, 2> RenderTerrain::meshTileCapOrigin(const TransformState& state) {
@@ -409,15 +433,20 @@ void RenderTerrain::update(RenderOrchestrator& orchestrator,
     }
 
     // Create terrain drawables for each mesh tile
+    const uint8_t demMaxZoom = demSource->getMaxZoom();
     for (const auto& unwrapped : meshTiles) {
         const OverscaledTileID tileID(unwrapped.canonical.z, unwrapped.wrap, unwrapped.canonical);
+        // The tile's own DEM: itself, or past the DEM's maxzoom its maxzoom ancestor, which is the
+        // deepest DEM that will ever load for it (see demTileFor). Binding that one as tier 2 keeps
+        // an overzoomed tile on the early-out below instead of searching ancestors every frame.
+        const UnwrappedTileID ownDEM = demTileFor(unwrapped, demMaxZoom);
 
         // Skip if the tile already has a drawable bound to its own DEM, but mark that DEM used:
         // this early-out is a tier-2 tile's only path, so the LRU could otherwise evict the
         // texture from under the drawable still sampling it.
         if (const auto existing = tilesWithDrawables.find(tileID);
             existing != tilesWithDrawables.end() && existing->second.tier == 2) {
-            if (auto cached = demTextures.find(unwrapped); cached != demTextures.end()) {
+            if (auto cached = demTextures.find(ownDEM); cached != demTextures.end()) {
                 cached->second.lastUsed = demUpdateCounter;
             }
             continue;
@@ -438,11 +467,18 @@ void RenderTerrain::update(RenderOrchestrator& orchestrator,
         // existing drawable is rebound, and the GL instanced-depth block reads its array layer.
         const UnwrappedTileID* demTileUsed = nullptr;
 
-        if (auto cached = demTextures.find(unwrapped); cached != demTextures.end()) {
+        if (auto cached = demTextures.find(ownDEM); cached != demTextures.end()) {
             cached->second.lastUsed = demUpdateCounter;
             demTexture = cached->second.texture;
             demTier = 2;
-            demTileUsed = &unwrapped;
+            demTileUsed = &cached->first;
+            if (ownDEM != unwrapped) {
+                const auto off = demSubTileOffset(unwrapped.canonical, ownDEM.canonical);
+                demCoords = {{1.0f / (util::EXTENT * off.scale),
+                              off.dx / off.scale,
+                              off.dy / off.scale,
+                              static_cast<float>(demDim)}};
+            }
         } else {
             // Fall back to the closest cached ancestor DEM
             const UnwrappedTileID* ancestorID = nullptr;

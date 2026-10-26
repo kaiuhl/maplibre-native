@@ -42,6 +42,10 @@ class ShaderRegistry;
 class Texture2D;
 } // namespace gfx
 
+namespace util {
+struct TileCoverParameters;
+} // namespace util
+
 #if MLN_RENDER_BACKEND_OPENGL
 namespace gl {
 class Texture2DArray;
@@ -86,6 +90,21 @@ public:
     static std::set<UnwrappedTileID> nearestMeshTiles(std::set<UnwrappedTileID> tiles,
                                                       size_t maxTiles,
                                                       const std::array<double, 2>& origin);
+
+    /// The elevation-aware ideal mesh cover for `zoom` (the frame's LOD-shifted zoom), before
+    /// the one-ring dilation and the tile cap. Past the DEM source's `demMaxZoom` it keeps
+    /// covering at the view's zoom, so each draped tile stays one 1024 px target per view tile
+    /// instead of one maxzoom drape stretched over 2^dz view tiles; the deeper tiles sample the
+    /// maxzoom DEM through `demTileFor`. Returns {} when `zoom` covers below zoom 0.
+    static std::set<UnwrappedTileID> idealMeshCover(const util::TileCoverParameters& coverParams,
+                                                    double zoom,
+                                                    uint16_t tileSize,
+                                                    uint8_t demMaxZoom);
+
+    /// The DEM tile that is a mesh tile's own: the tile itself, or for a tile deeper than the
+    /// DEM source's `demMaxZoom`, its ancestor at that zoom - the deepest DEM that will ever load
+    /// for it.
+    static UnwrappedTileID demTileFor(const UnwrappedTileID& meshTile, uint8_t demMaxZoom);
 
     /// Resolve the DEM render source from the orchestrator if not yet bound.
     /// Renderer::Impl::render calls this before building the frame's drape-target
