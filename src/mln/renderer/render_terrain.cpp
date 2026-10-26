@@ -285,11 +285,11 @@ void RenderTerrain::update(RenderOrchestrator& orchestrator,
         return;
     }
 
-    // Get tiles from the DEM source
+    // Get tiles from the DEM source. No early return when it has none (below its minzoom, or
+    // before the first loads): the mesh is the view's cover whatever is loaded, drawn flat until a
+    // DEM arrives. Returning here drew no terrain at all below the minzoom, and on a zoom out past
+    // it left the previous zoom's tiles on screen, since dropping tiles that left the cover is below.
     auto renderTiles = demSource->getRawRenderTiles();
-    if (renderTiles->empty()) {
-        return;
-    }
 
     // Cast to LayerGroup for addDrawable
     auto* lg = static_cast<LayerGroup*>(layerGroup.get());
