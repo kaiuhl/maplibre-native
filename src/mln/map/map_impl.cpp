@@ -534,11 +534,8 @@ bool Map::Impl::settleCenterOnGround() {
 }
 
 void Map::Impl::easeTransitionOntoGround() {
-    // An animated move to a centre was given the altitude of the ground there as far as anyone
-    // knew when it started, the current one where that hadn't loaded. It eases the centre onto
-    // the ground there as the heights for it arrive, as gl-js's Camera._updateElevation does, so
-    // that the clamp has nothing left to move once the move ends: left at the altitude it was
-    // given, the camera jumped onto ground that loaded during the move on the frame it ended.
+    // An animated move to a centre eases it onto the ground there as the heights for it arrive, as
+    // gl-js's Camera._updateElevation does, so that the clamp has nothing left to move once it ends.
     if (!centerClampedToGround || !cameraSetToCenter || !style->impl->getTerrain()) {
         return;
     }
@@ -589,10 +586,8 @@ std::optional<double> Map::Impl::groundAt(LatLng latLng) const {
 }
 
 bool Map::Impl::clampCenterToTerrain(double elevationMeters, bool ease) {
-    // No DEM tile covers the centre yet (a move that ends over ground whose heights are still on
-    // their way): the ground there is unknown. Put at sea level, the whole view dove hundreds of
-    // points and jumped back up once the heights arrived, seconds later. The centre stays at the
-    // altitude it has instead, and is eased onto the ground when that arrives.
+    // No DEM tile covers the centre yet: the ground there is unknown, not at sea level. The centre
+    // stays at the altitude it has, and is eased onto the ground when that arrives.
     if (std::isnan(elevationMeters)) {
         centerHeldOverUnknownGround = true;
         centerAwaitingHeights = true;
@@ -611,8 +606,8 @@ bool Map::Impl::clampCenterToTerrain(double elevationMeters, bool ease) {
         transform.jumpTo(CameraOptions().withCenterAltitude(elevationMeters));
         return true;
     }
-    // A held centre can be far off the ground that arrives (the altitude a move set out from):
-    // eased there, from rest to rest, rather than jumped.
+    // A held centre can be far off the ground that arrives (the altitude a move set out from), and a
+    // centre an animated move was given eased onto its ground on the way: eased there.
     transform.easeCenterAltitudeTo(elevationMeters);
     return true;
 }
