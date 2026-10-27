@@ -31,6 +31,7 @@ add_library(
     ${PROJECT_SOURCE_DIR}/test/renderer/terrain_elevation_index.test.cpp
     ${PROJECT_SOURCE_DIR}/test/renderer/terrain_standin.test.cpp
     ${PROJECT_SOURCE_DIR}/test/renderer/terrain_below_dem.test.cpp
+    ${PROJECT_SOURCE_DIR}/test/renderer/terrain_dem_cache.test.cpp
     ${PROJECT_SOURCE_DIR}/test/renderer/terrain_elevation.test.cpp
     ${PROJECT_SOURCE_DIR}/test/renderer/shader_registry.test.cpp
     ${PROJECT_SOURCE_DIR}/test/renderer/hillshade_prepare.test.cpp

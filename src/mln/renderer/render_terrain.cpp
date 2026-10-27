@@ -430,30 +430,22 @@ void RenderTerrain::update(RenderOrchestrator& orchestrator,
         return;
     }
 
-    // Decode and cache the DEM textures of loaded DEM tiles - rendered ones and the
-    // retained ancestors alike, so shallower layer tiles can bind an ancestor DEM.
+    // The loaded DEM tiles - rendered ones and the retained ancestors alike, so shallower mesh
+    // tiles can bind an ancestor DEM. Their textures are made below, once the cover is known.
     ++demUpdateCounter;
+    const std::vector<LoadedDEMTile> loadedTiles = loadedDEMTiles(demSource);
 #if MLN_RENDER_BACKEND_OPENGL
     // This frame's DEM data by tile, for packing a tile into the GL array once a mesh tile binds it
     std::unordered_map<UnwrappedTileID, const DEMData*> frameDEMData;
 #endif
-    for (const auto& loaded : loadedDEMTiles(demSource)) {
-        const DEMData* demData = loaded.data;
+    for (const auto& loaded : loadedTiles) {
 #if MLN_RENDER_BACKEND_OPENGL
-        frameDEMData.emplace(loaded.id, demData);
+        frameDEMData.emplace(loaded.id, loaded.data);
 #endif
-        {
-            // All tiles come from the same raster-dem source, so they share one
-            // encoding and DEM dimension
-            demUnpackVector = demData->getUnpackVector();
-            demDim = demData->dim;
-            if (auto existing = demTextures.find(loaded.id); existing != demTextures.end()) {
-                existing->second.lastUsed = demUpdateCounter;
-            } else if (auto texture = createDEMTexture(context, *demData)) {
-                // Keep the texture available for elevation sampling by non-draped layers
-                demTextures[loaded.id] = {texture, demData->dim, demUpdateCounter};
-            }
-        }
+        // All tiles come from the same raster-dem source, so they share one encoding and DEM
+        // dimension
+        demUnpackVector = loaded.data->getUnpackVector();
+        demDim = loaded.data->dim;
     }
 
     // The mesh (and drape) tile set: an elevation-aware, LOD-based ideal cover
@@ -494,25 +486,40 @@ void RenderTerrain::update(RenderOrchestrator& orchestrator,
             ++it;
         }
     }
+    // A DEM tile is related to the cover when it is a mesh tile, an ancestor of one or a
+    // descendant of one.
+    const auto relatedToCover = [&](const UnwrappedTileID& demTile) {
+        return std::any_of(meshTiles.begin(), meshTiles.end(), [&](const UnwrappedTileID& mesh) {
+            return mesh == demTile || mesh.isChildOf(demTile) || demTile.isChildOf(mesh);
+        });
+    };
     // Retain cached DEM textures that are related to the current tile set so they
     // can serve as ancestor fallbacks while exact tiles load (as maplibre-gl-js
     // retains terrain tiles in its source cache); drop unrelated ones
     for (auto it = demTextures.begin(); it != demTextures.end();) {
-        bool related = false;
-        for (const auto& current : currentTiles) {
-            const UnwrappedTileID unwrapped = current.toUnwrapped();
-            if (unwrapped == it->first || unwrapped.isChildOf(it->first) || it->first.isChildOf(unwrapped)) {
-                related = true;
-                break;
-            }
-        }
-        if (related) {
+        if (relatedToCover(it->first)) {
             it = std::next(it);
         } else {
 #if MLN_RENDER_BACKEND_OPENGL
             freeDEMArrayLayer(it->first);
 #endif
             it = demTextures.erase(it);
+            context.renderingStats().numDEMTexturesReleased++;
+        }
+    }
+    // Decode a texture for each loaded DEM tile the cover relates to, the only ones the step above
+    // keeps. The DEM source loads past the mesh's reach (the cover is capped to the tiles nearest
+    // the camera, and its own cover is not), and giving those tiles a texture had the step above
+    // drop it again in the same update: a view at rest made and threw away textures every frame.
+    for (const auto& loaded : loadedTiles) {
+        if (auto existing = demTextures.find(loaded.id); existing != demTextures.end()) {
+            existing->second.lastUsed = demUpdateCounter;
+        } else if (!relatedToCover(loaded.id)) {
+            continue;
+        } else if (auto texture = createDEMTexture(context, *loaded.data)) {
+            // Keep the texture available for elevation sampling by non-draped layers
+            demTextures[loaded.id] = {texture, loaded.data->dim, demUpdateCounter};
+            context.renderingStats().numDEMTexturesCreated++;
         }
     }
     // Cap the cache: ancestor/descendant relations accumulate while browsing
@@ -535,6 +542,7 @@ void RenderTerrain::update(RenderOrchestrator& orchestrator,
             freeDEMArrayLayer(id);
 #endif
             demTextures.erase(id);
+            context.renderingStats().numDEMTexturesReleased++;
         }
     }
 

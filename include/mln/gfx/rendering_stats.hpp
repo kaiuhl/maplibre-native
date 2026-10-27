@@ -111,6 +111,11 @@ struct RenderingStats {
     int numDrapeMasksDrawn = 0;
     int numDrapeMasksSkipped = 0;
 
+    /// Terrain DEM textures created, and cached ones released. A view at rest creates none: a
+    /// steady count of both means textures are made and dropped every frame
+    int numDEMTexturesCreated = 0;
+    int numDEMTexturesReleased = 0;
+
     /// Per-phase CPU time of the terrain path this frame (seconds), for profiling
     /// where the terrain overhead goes when nothing re-renders
     double terrainUpdateTime = 0.0;  ///< RenderTerrain::update (tile/DEM/drawable management)
