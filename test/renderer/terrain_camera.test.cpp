@@ -21,7 +21,10 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <iterator>
 #include <thread>
+#include <utility>
+#include <vector>
 
 using namespace mln;
 
@@ -485,6 +488,35 @@ std::string makeDEMTile(double meters) {
 
 constexpr double westPlateauMeters = 2000.0;
 
+// The camera's height on each frame of a rise from one plateau to the other, and when the frame was
+// rendered. Frames come as fast as the machine renders them, so how far the camera rose on any one
+// of them depends on the machine; how long the rise took doesn't.
+struct Rise {
+    std::vector<std::pair<TimePoint, double>> frames;
+
+    void add(double height) { frames.emplace_back(Clock::now(), height); }
+
+    // Milliseconds from the last frame at the height the camera started at to the first at the height
+    // it ended at, to within a metre: an ease's duration at least, however far apart frames come, and
+    // one frame for a jump. None if it didn't rise.
+    double milliseconds() const {
+        if (frames.empty() || std::abs(frames.back().second - frames.front().second) <= mercatorMetre) {
+            return 0.0;
+        }
+        const double from = frames.front().second;
+        const double to = frames.back().second;
+        const auto arrived = std::find_if(
+            frames.begin(), frames.end(), [&](const auto& frame) { return std::abs(frame.second - to) <= mercatorMetre; });
+        const auto left = std::find_if(std::make_reverse_iterator(arrived), frames.rend(), [&](const auto& frame) {
+            return std::abs(frame.second - from) <= mercatorMetre;
+        });
+        if (left == frames.rend()) {
+            return 0.0;
+        }
+        return std::chrono::duration<double, std::milli>(arrived->first - left->first).count();
+    }
+};
+
 // Continuous mode, so camera transitions run on the clock while frames render, with the
 // clamp on. The z2 DEM tiles between 90°W and the prime meridian (x = 1) are a 2000 m
 // plateau, the rest 1000 m, so a move west from Innsbruck crosses a step in the terrain.
@@ -894,6 +926,42 @@ TEST(TerrainCamera, TiltInPlaceEasesTheCentreAltitude) {
     EXPECT_NEAR(test.altitude(), plateauMeters, 5.0);
     // Eased: no frame of the 1000 m rise is a jump.
     EXPECT_LT(largestStep, 400.0);
+}
+
+// Heights that arrive in the last frames of a move were eased onto over what was left of it, a frame
+// or two, and the view moved by hundreds of points on one of them (Timberline, 351 pt, heights 0.1 s
+// before the end). The rest of the way takes 0.4 s at least instead, the move running on past its
+// end until it is on the ground.
+TEST(TerrainCamera, GroundArrivingAtTheEndOfAMoveIsEasedOnto) {
+    TerrainTransitionTest test;
+    test.holdWest = true;
+    ASSERT_TRUE(test.settleOnPlateau());
+
+    const auto start = Clock::now();
+    bool released = false;
+    Rise rise;
+    rise.add(test.eye()[2]);
+    ASSERT_TRUE(test.runTransition(
+        [&](const AnimationOptions& animation) {
+            test.map.easeTo(CameraOptions().withCenter(test.westTarget).withCenterAltitude(plateauMeters), animation);
+        },
+        [&](bool) {
+            rise.add(test.eye()[2]);
+            // 0.25 s before the 1.5 s move ends, the plateau's tiles arrive: their heights reach the
+            // map a few frames later.
+            if (!released && Clock::now() - start >= Milliseconds(1250)) {
+                test.holdWest = false;
+                released = true;
+            }
+            std::this_thread::sleep_for(Milliseconds(16));
+        }));
+    ASSERT_TRUE(released);
+
+    // On the plateau as the move ended, the 1000 m rise eased over 0.4 s, where it took what was left
+    // of the move, about 0.2 s.
+    EXPECT_GE(rise.milliseconds(), 300.0);
+    test.expectEyeAtEnd();
+    EXPECT_NEAR(test.altitude(), westPlateauMeters, 5.0);
 }
 
 // The same for a free camera set while a transition runs: it stays where it was put.
