@@ -66,12 +66,13 @@ struct TerrainLoadBudget {
     int newTileBuildsPerFrame;  ///< max NEW tiles that build their drawables per frame
     int drapeRerendersPerFrame; ///< max terrain drape targets that re-render per frame
     /// Hard cap on terrain mesh tiles per frame (0 = unlimited). When the cover exceeds it the
-    /// tiles nearest the camera are kept and the farthest - the horizon tiles a high tilt
-    /// pulls in - are dropped. Everything downstream scales with this (mesh draws, drape
-    /// targets and re-renders, depth instances), so it is the bluntest frame-time lever - and
-    /// it costs terrain render *distance*, which is why Quality and Balanced keep a generous cap
-    /// rather than the aggressive one Performance uses: Balanced spreads work over frames but
-    /// draws the same ground as Quality.
+    /// tiles farthest from the camera for their size - the horizon tiles a high tilt pulls in -
+    /// are coarsened into their parents until it fits, so the far ground is drawn coarser, never
+    /// left out. Everything downstream scales with this (mesh draws, drape targets and
+    /// re-renders, depth instances), so it is the bluntest frame-time lever - and it costs the
+    /// far ground's detail, which is why Quality and Balanced keep a generous cap rather than
+    /// the aggressive one Performance uses: Balanced spreads work over frames but draws the
+    /// same ground as Quality.
     size_t maxMeshTiles;
 };
 

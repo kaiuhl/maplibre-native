@@ -81,8 +81,31 @@ public:
     /// mesh cover instead stays at the view's ideal zoom; the DEM/drape textures
     /// fall back to ancestors per tile while exact tiles load. Needs the DEM
     /// source, so it is a member (not static). Returns {} when there is none.
+    /// It is meshCover over the DEM source, with the frame's LOD settings and the load mode's
+    /// tile cap.
     std::set<UnwrappedTileID> computeMeshCover(const TransformState& state,
                                                const std::shared_ptr<UpdateParameters>& updateParameters) const;
+
+    /// The mesh cover of a view: idealMeshCover with the terrain's LOD (coverLodMode of the map's,
+    /// which `coverParams` carries), its one-ring (dilateMeshCover), the frustum trim, then
+    /// capMeshCover into `maxTiles` (0: no cap).
+    static std::set<UnwrappedTileID> meshCover(util::TileCoverParameters coverParams,
+                                               double zoom,
+                                               uint16_t tileSize,
+                                               uint8_t demMaxZoom,
+                                               size_t maxTiles);
+
+    /// The tile LOD the terrain covers with, given the map's (UpdateParameters::tileLodMode).
+    /// The default, one zoom for the whole view until the pitch passes tileLodPitchThreshold,
+    /// becomes maplibre-gl-js's per-tile zoom (TileLodMode::Adaptive), which gl-js applies to
+    /// every tile cover whenever terrain is present: finest near the camera, coarser with
+    /// distance. Kept at one zoom, a steep view at a high zoom needed hundreds of tiles to reach
+    /// the ground at the top of the screen (230 at z17 tilted 60 deg over a summit). A map that
+    /// chose a variable zoom itself keeps it. The DEM source keeps the map's: it loads the DEM
+    /// tiles of the mesh's coarse tiles as well (meshDEMTiles).
+    static TileLodMode coverLodMode(TileLodMode mapMode) {
+        return mapMode == TileLodMode::Default ? TileLodMode::Adaptive : mapMode;
+    }
 
     /// `cover` and its one-ring: every 8-neighbour of each tile at that tile's zoom, less those
     /// that would overlap a tile already in it, so the mesh never holds two tiles of one place.
@@ -92,12 +115,33 @@ public:
     /// the ground under the camera (the map centre when the map is not tilted).
     static std::array<double, 2> meshTileCapOrigin(const TransformState& state);
 
-    /// The `maxTiles` tiles whose centres lie nearest `origin` (normalized web-mercator), or all
-    /// of them when there are no more than that or `maxTiles` is 0. The mesh-tile cap
-    /// (TerrainLoadBudget::maxMeshTiles) that computeMeshCover applies.
-    static std::set<UnwrappedTileID> nearestMeshTiles(std::set<UnwrappedTileID> tiles,
-                                                      size_t maxTiles,
-                                                      const std::array<double, 2>& origin);
+    /// The mesh-tile cap (TerrainLoadBudget::maxMeshTiles) that meshCover applies: `tiles` in at
+    /// most `maxTiles` tiles (0: no cap) that cover the same ground. While there are more, the
+    /// tile that is the most of its own widths away from `origin` (normalized web-mercator), the
+    /// smallest on screen, gives way to its parent, which takes the place of every tile inside
+    /// it. Coarsening keeps every tile's ground drawn: dropping the farthest tiles instead left
+    /// the ground they held as bare background, the top of a steep view at a high zoom. The
+    /// ground under `origin` keeps its zoom longest; ties go by tile ID.
+    static std::set<UnwrappedTileID> capMeshCover(std::set<UnwrappedTileID> tiles,
+                                                  size_t maxTiles,
+                                                  const std::array<double, 2>& origin);
+
+    /// Whether `cover` holds a tile under the point `point` (tile-local, 0..EXTENT) of `tileID`.
+    /// `zooms` has bit z set for each zoom z of the tiles in `cover`.
+    static bool coverHolds(const std::set<UnwrappedTileID>& cover,
+                           uint32_t zooms,
+                           const UnwrappedTileID& tileID,
+                           const Point<float>& point);
+
+    /// Take this frame's mesh cover for symbol placement (groundDrawnAt). The orchestrator
+    /// hands it over before it places symbols, ahead of the renderer, which draws the same.
+    void setPlacementCover(std::set<UnwrappedTileID> cover);
+
+    /// Whether the terrain draws ground under the point `point` (tile-local) of `tileID`: a tile of
+    /// the cover handed to setPlacementCover holds it.
+    bool groundDrawnAt(const UnwrappedTileID& tileID, const Point<float>& point) const {
+        return coverHolds(placementCover, placementCoverZooms, tileID, point);
+    }
 
     /// The elevation-aware ideal mesh cover for `zoom` (the frame's LOD-shifted zoom), before
     /// the one-ring dilation and the tile cap. Once the view's own zoom (the transform's, before
@@ -117,6 +161,19 @@ public:
     /// DEM source's `demMaxZoom`, its ancestor at that zoom - the deepest DEM that will ever load
     /// for it.
     static UnwrappedTileID demTileFor(const UnwrappedTileID& meshTile, uint8_t demMaxZoom);
+
+    /// The DEM tiles of the mesh tiles in `cover` coarser than `demMaxZoom` (each one's own, the
+    /// tile itself), as the DEM source keys them (TileParameters::terrainMeshTiles). The source
+    /// covers the view with its own tiles; the mesh draws far ground coarser than those, by its
+    /// LOD and further by its cap, and a mesh tile with neither its own DEM tile nor an
+    /// ancestor's is drawn flat, away from the ground it stands for: off the screen for ground
+    /// far below the camera. A tile at or past `demMaxZoom` binds its maxzoom tile, which the
+    /// source's cover holds or stands in for with a coarser one.
+    static std::vector<OverscaledTileID> coarseMeshDEMTiles(const std::set<UnwrappedTileID>& cover,
+                                                            uint8_t demMaxZoom);
+
+    /// coarseMeshDEMTiles of `cover` for the DEM source; none before the source is bound.
+    std::vector<OverscaledTileID> meshDEMTiles(const std::set<UnwrappedTileID>& cover) const;
 
     /// Resolve the DEM render source from the orchestrator if not yet bound.
     /// Renderer::Impl::render calls this before building the frame's drape-target
@@ -483,6 +540,10 @@ private:
     /// Mesh cover for the current frame, set by Renderer::Impl before the drape
     /// target pool is built; consumed (and cleared) by update()
     std::optional<std::set<UnwrappedTileID>> frameMeshCover;
+    /// The frame's mesh cover as symbol placement sees it (setPlacementCover), and a bit for each
+    /// zoom in it
+    std::set<UnwrappedTileID> placementCover;
+    uint32_t placementCoverZooms = 0;
 
     // DEM decode vector for the source's encoding (default: Mapbox Terrain-RGB)
     std::array<float, 4> demUnpackVector = {{6553.6f, 25.6f, 0.1f, 10000.0f}};
