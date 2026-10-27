@@ -86,12 +86,20 @@ public:
     void fetch(const Resource &resource, const ActorRef<FileSourceRequest> &request) {
         std::scoped_lock lock(mutex);
         ++fetches;
+        ++openFetches;
         if (holding) {
             held.emplace_back(resource, request);
-            heldChanged.notify_all();
+            changed.notify_all();
         } else {
             respond(resource, request);
         }
+    }
+
+    // A fetch is closed when its request is cancelled or freed.
+    void close() {
+        std::scoped_lock lock(mutex);
+        --openFetches;
+        changed.notify_all();
     }
 
     void hold() {
@@ -102,7 +110,13 @@ public:
     // Waits until `count` fetches are held.
     bool waitForHeld(std::size_t count) {
         std::unique_lock lock(mutex);
-        return heldChanged.wait_for(lock, std::chrono::seconds(10), [&] { return held.size() >= count; });
+        return changed.wait_for(lock, std::chrono::seconds(10), [&] { return held.size() >= count; });
+    }
+
+    // Waits until `count` fetches are open.
+    bool waitForOpenFetches(std::size_t count) {
+        std::unique_lock lock(mutex);
+        return changed.wait_for(lock, std::chrono::seconds(5), [&] { return openFetches == count; });
     }
 
     // Answers the held fetches in the order they were made, and stops holding.
@@ -131,10 +145,11 @@ private:
 
     const std::string bytes;
     std::mutex mutex;
-    std::condition_variable heldChanged;
+    std::condition_variable changed;
     bool holding = false;
     std::vector<std::pair<Resource, ActorRef<FileSourceRequest>>> held;
     std::size_t fetches = 0;
+    std::size_t openFetches = 0;
 };
 
 class ArchiveFileSource final : public FileSource {
@@ -144,6 +159,7 @@ public:
 
     std::unique_ptr<AsyncRequest> request(const Resource &resource, Callback callback) override {
         auto req = std::make_unique<FileSourceRequest>(std::move(callback));
+        req->onCancel([source = archive] { source->close(); });
         archive->fetch(resource, req->actor());
         return req;
     }
@@ -483,4 +499,44 @@ TEST(PMTilesFileSource, DirectoryCacheEviction) {
     fetches = archive->fetchCount();
     expectTile(2, requestOnce(loop, pmtiles, tileResource(2)));
     EXPECT_EQ(fetches + 2, archive->fetchCount());
+}
+
+// Cancelling a request cancels the archive fetch it's waiting for, and its lookup goes no further.
+TEST(PMTilesFileSource, CancelledRequestStopsLookup) {
+    util::RunLoop loop;
+
+    auto archive = std::make_shared<Archive>(makeLeafPerTileArchive(1));
+    ScopedArchiveLoader loader(archive);
+    PMTilesFileSource pmtiles(archiveResourceOptions(), ClientOptions());
+
+    // Read the header, so the tile request's first fetch is the root directory.
+    ASSERT_FALSE(requestOnce(loop, pmtiles, {Resource::Source, archiveURL}).error);
+
+    archive->hold();
+    std::unique_ptr<AsyncRequest> request = pmtiles.request(
+        tileResource(0), [](const Response &) { ADD_FAILURE() << "the cancelled request was answered"; });
+    ASSERT_TRUE(archive->waitForHeld(1));
+    const std::size_t fetches = archive->fetchCount();
+
+    request.reset();
+    EXPECT_TRUE(archive->waitForOpenFetches(0));
+
+    // Answering the cancelled fetch doesn't go on to the leaf directory. The request after it, which
+    // the cache answers, waits for the file source to deal with the answer first.
+    archive->release();
+    ASSERT_FALSE(requestOnce(loop, pmtiles, {Resource::Source, archiveURL}).error);
+    EXPECT_EQ(fetches, archive->fetchCount());
+}
+
+// Releasing an answered request frees the archive fetches it made.
+TEST(PMTilesFileSource, FinishedRequestFreesFetches) {
+    util::RunLoop loop;
+
+    auto archive = std::make_shared<Archive>(makeLeafPerTileArchive(1));
+    ScopedArchiveLoader loader(archive);
+    PMTilesFileSource pmtiles(archiveResourceOptions(), ClientOptions());
+
+    ASSERT_FALSE(requestOnce(loop, pmtiles, {Resource::Source, archiveURL}).error);
+    expectTile(0, requestOnce(loop, pmtiles, tileResource(0)));
+    EXPECT_TRUE(archive->waitForOpenFetches(0));
 }

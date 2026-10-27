@@ -222,6 +222,9 @@ public:
         return clientOptions.clone();
     }
 
+    // Cancels the archive fetch the request is waiting for, if any, which ends its lookup.
+    void cancel(AsyncRequest* req) { tasks.erase(req); }
+
 private:
     mutable std::mutex resourceOptionsMutex;
     mutable std::mutex clientOptionsMutex;
@@ -653,6 +656,9 @@ PMTilesFileSource::PMTilesFileSource(const ResourceOptions& resourceOptions, con
 
 std::unique_ptr<AsyncRequest> PMTilesFileSource::request(const Resource& resource, FileSource::Callback callback) {
     auto req = std::make_unique<FileSourceRequest>(std::move(callback));
+
+    req->onCancel(
+        [actorRef = thread->actor(), asyncRequest = req.get()]() { actorRef.invoke(&Impl::cancel, asyncRequest); });
 
     // assume if there is a tile request, that the pmtiles file has been validated
     if (resource.kind == Resource::Tile) {
