@@ -450,6 +450,9 @@ std::unique_ptr<RenderTree> RenderOrchestrator::createRenderTree(
     // Track which layers are flagged for rendering
     std::vector<bool> updateList(orderedLayers.size());
 
+    // The terrain's mesh cover this frame, worked out when the DEM source is updated
+    std::optional<std::set<UnwrappedTileID>> terrainCover;
+
     // Update all sources and initialize renderItems.
     for (const auto& sourceImpl : *sourceImpls) {
         MLN_TRACE_ZONE(update source);
@@ -536,12 +539,12 @@ std::unique_ptr<RenderTree> RenderOrchestrator::createRenderTree(
         tileParameters.coverCenter = isDEMSource;
         // It loads the DEM tiles of the terrain mesh's coarse far tiles too, which its own cover
         // has finer ones for, or none (see TileParameters::terrainMeshTiles). The mesh cover is
-        // this frame's, with the heights loaded so far.
+        // this frame's, with the heights loaded so far; placement reuses it below.
         tileParameters.terrainMeshTiles.clear();
         if (isDEMSource) {
             renderTerrain->prepareSource(*this);
-            tileParameters.terrainMeshTiles = renderTerrain->meshDEMTiles(
-                renderTerrain->computeMeshCover(updateParameters->transformState, updateParameters));
+            terrainCover = renderTerrain->computeMeshCover(updateParameters->transformState, updateParameters);
+            tileParameters.terrainMeshTiles = renderTerrain->meshDEMTiles(*terrainCover);
         }
         // It also loads the heights where a running animated move arrives, from the start of the
         // move (see TileParameters::destinationCenter).
@@ -609,6 +612,18 @@ std::unique_ptr<RenderTree> RenderOrchestrator::createRenderTree(
     bool symbolBucketsAdded = false;
     std::set<std::string> usedSymbolLayers;
     const auto longitude = static_cast<float>(updateParameters->transformState.getLatLng().longitude());
+    // Placement hides a symbol whose anchor is on screen where the terrain draws no ground
+    // (Placement::placeSymbol), so it is handed this frame's mesh cover
+    const auto placeOnTerrain = [&](Placement& placement) {
+        if (terrainEnabled) {
+            if (!terrainCover) {
+                renderTerrain->prepareSource(*this);
+                terrainCover = renderTerrain->computeMeshCover(updateParameters->transformState, updateParameters);
+            }
+            renderTerrain->setPlacementCover(*terrainCover);
+        }
+        placement.setTerrain(terrainEnabled ? renderTerrain.get() : nullptr);
+    };
     for (auto it = layersNeedPlacement.crbegin(); it != layersNeedPlacement.crend(); ++it) {
         MLN_TRACE_ZONE(placement layer);
         RenderLayer& layer = *it;
@@ -644,7 +659,7 @@ std::unique_ptr<RenderTree> RenderOrchestrator::createRenderTree(
         symbolBucketsChanged |= renderTreeParameters->placementChanged;
         if (renderTreeParameters->placementChanged) {
             Mutable<Placement> placement = Placement::create(updateParameters, placementController.getPlacement());
-            placement->setTerrain(terrainEnabled ? renderTerrain.get() : nullptr);
+            placeOnTerrain(*placement);
             placement->placeLayers(layersNeedPlacement);
             placement->setTerrain(nullptr); // so the kept Placement holds no pointer to it
             placementController.setPlacement(std::move(placement));
@@ -665,7 +680,7 @@ std::unique_ptr<RenderTree> RenderOrchestrator::createRenderTree(
         if (renderTreeParameters->placementChanged) {
             Mutable<Placement> placement = Placement::create(updateParameters);
             placement->collectPlacedSymbolData(placedSymbolDataCollected);
-            placement->setTerrain(terrainEnabled ? renderTerrain.get() : nullptr);
+            placeOnTerrain(*placement);
             placement->placeLayers(layersNeedPlacement);
             placement->setTerrain(nullptr); // so the kept Placement holds no pointer to it
             placementController.setPlacement(std::move(placement));

@@ -382,6 +382,43 @@ std::vector<OverscaledTileID> RenderTerrain::meshDEMTiles(const std::set<Unwrapp
     return demSource ? coarseMeshDEMTiles(cover, demSource->getMaxZoom()) : std::vector<OverscaledTileID>{};
 }
 
+bool RenderTerrain::coverHolds(const std::set<UnwrappedTileID>& cover,
+                               uint32_t zooms,
+                               const UnwrappedTileID& tileID,
+                               const Point<float>& point) {
+    // The point in world widths (wrap included)
+    const double scale = std::exp2(static_cast<double>(tileID.canonical.z));
+    const double wx = (tileID.canonical.x + static_cast<double>(point.x) / util::EXTENT) / scale + tileID.wrap;
+    const double wy = (tileID.canonical.y + static_cast<double>(point.y) / util::EXTENT) / scale;
+    if (wy < 0.0 || wy >= 1.0) {
+        return false;
+    }
+    for (uint8_t z = 0; z < 32; ++z) {
+        if (!(zooms & (1u << z))) {
+            continue;
+        }
+        const double tiles = std::exp2(static_cast<double>(z));
+        const double x = std::floor(wx * tiles);
+        const double wrap = std::floor(x / tiles);
+        const UnwrappedTileID id(static_cast<int16_t>(wrap),
+                                 CanonicalTileID(z,
+                                                 static_cast<uint32_t>(x - wrap * tiles),
+                                                 static_cast<uint32_t>(std::floor(wy * tiles))));
+        if (cover.contains(id)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void RenderTerrain::setPlacementCover(std::set<UnwrappedTileID> cover) {
+    placementCover = std::move(cover);
+    placementCoverZooms = 0;
+    for (const auto& id : placementCover) {
+        placementCoverZooms |= 1u << id.canonical.z;
+    }
+}
+
 void RenderTerrain::prepareSource(RenderOrchestrator& orchestrator) {
     // Find the DEM source if we haven't already (see header: must happen before
     // the frame's drape-target pool is built, or the first frame renders no terrain)

@@ -126,6 +126,23 @@ public:
                                                   size_t maxTiles,
                                                   const std::array<double, 2>& origin);
 
+    /// Whether `cover` holds a tile under the point `point` (tile-local, 0..EXTENT) of `tileID`.
+    /// `zooms` has bit z set for each zoom z of the tiles in `cover`.
+    static bool coverHolds(const std::set<UnwrappedTileID>& cover,
+                           uint32_t zooms,
+                           const UnwrappedTileID& tileID,
+                           const Point<float>& point);
+
+    /// Take this frame's mesh cover for symbol placement (groundDrawnAt). The orchestrator
+    /// hands it over before it places symbols, ahead of the renderer, which draws the same.
+    void setPlacementCover(std::set<UnwrappedTileID> cover);
+
+    /// Whether the terrain draws ground under the point `point` (tile-local) of `tileID`: a tile of
+    /// the cover handed to setPlacementCover holds it.
+    bool groundDrawnAt(const UnwrappedTileID& tileID, const Point<float>& point) const {
+        return coverHolds(placementCover, placementCoverZooms, tileID, point);
+    }
+
     /// The elevation-aware ideal mesh cover for `zoom` (the frame's LOD-shifted zoom), before
     /// the one-ring dilation and the tile cap. Once the view's own zoom (the transform's, before
     /// any LOD shift) is past the DEM source's `demMaxZoom`, it keeps covering at the view's zoom,
@@ -523,6 +540,10 @@ private:
     /// Mesh cover for the current frame, set by Renderer::Impl before the drape
     /// target pool is built; consumed (and cleared) by update()
     std::optional<std::set<UnwrappedTileID>> frameMeshCover;
+    /// The frame's mesh cover as symbol placement sees it (setPlacementCover), and a bit for each
+    /// zoom in it
+    std::set<UnwrappedTileID> placementCover;
+    uint32_t placementCoverZooms = 0;
 
     // DEM decode vector for the source's encoding (default: Mapbox Terrain-RGB)
     std::array<float, 4> demUnpackVector = {{6553.6f, 25.6f, 0.1f, 10000.0f}};

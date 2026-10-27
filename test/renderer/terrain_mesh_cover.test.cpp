@@ -133,6 +133,28 @@ TEST(TerrainMeshCover, CapKeepsTheGroundUnderATiltedCameraAtItsZoom) {
     EXPECT_EQ(fromTheCentre, RenderTerrain::capMeshCover(cover, 5, {{0.75, 0.5}}));
 }
 
+// A tile of the cover holds the ground of every point inside it, whatever the zoom of the tile the
+// point is given in, and nothing outside it.
+TEST(TerrainMeshCover, CoverHoldsTheGroundInsideItsTiles) {
+    const std::set<UnwrappedTileID> cover{z2(1, 1), UnwrappedTileID(0, CanonicalTileID(3, 6, 2))};
+    uint32_t zooms = (1u << 2) | (1u << 3);
+    const float mid = util::EXTENT / 2.0f;
+    // In the z2 tile, given in it, in a deeper tile inside it, and in a shallower one
+    EXPECT_TRUE(RenderTerrain::coverHolds(cover, zooms, z2(1, 1), {mid, mid}));
+    EXPECT_TRUE(RenderTerrain::coverHolds(cover, zooms, UnwrappedTileID(0, CanonicalTileID(5, 13, 13)), {mid, mid}));
+    EXPECT_TRUE(RenderTerrain::coverHolds(cover, zooms, z1(0, 0), {3 * mid / 2, 3 * mid / 2}));
+    // In the z3 tile, and in its z2 parent's other quarters, which the cover does not hold
+    EXPECT_TRUE(RenderTerrain::coverHolds(cover, zooms, z2(3, 1), {mid / 2, mid / 2}));
+    EXPECT_FALSE(RenderTerrain::coverHolds(cover, zooms, z2(3, 1), {3 * mid / 2, mid / 2}));
+    EXPECT_FALSE(RenderTerrain::coverHolds(cover, zooms, z2(0, 0), {mid, mid}));
+    // Past the tile's edge, in its neighbour; in another world copy; past the poles
+    EXPECT_FALSE(RenderTerrain::coverHolds(cover, zooms, z2(1, 1), {mid, util::EXTENT + 1.0f}));
+    EXPECT_FALSE(RenderTerrain::coverHolds(cover, zooms, UnwrappedTileID(1, CanonicalTileID(2, 1, 1)), {mid, mid}));
+    EXPECT_FALSE(RenderTerrain::coverHolds(cover, zooms, z2(1, 0), {mid, -util::EXTENT * 2.0f}));
+    // An empty cover holds nothing
+    EXPECT_FALSE(RenderTerrain::coverHolds({}, 0, z2(1, 1), {mid, mid}));
+}
+
 // The DEM source loads the own DEM tile of every mesh tile coarser than its maxzoom (z15 here),
 // keyed as the source keys its tiles below the maxzoom; a tile at or past it binds a maxzoom tile
 // the source's cover holds.

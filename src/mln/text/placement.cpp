@@ -283,6 +283,20 @@ JointPlacement Placement::placeSymbol(const SymbolInstance& symbolInstance, cons
         // a parent tile that _should_ be placed.
         return kUnplaced;
     }
+    // On 3D terrain a symbol stands on the ground the terrain draws. Where the screen shows no
+    // terrain under its anchor (no mesh tile of the frame's cover holds it), it would float over
+    // the background, so it is hidden whatever its allow-overlap. Only on screen: an anchor just
+    // off it is placed as before, so a pan shows it without waiting for the next placement.
+    if (placementTerrain &&
+        !placementTerrain->groundDrawnAt(ctx.getRenderTile().id, symbolInstance.getAnchor().point)) {
+        const auto anchor = project(symbolInstance.getAnchor().point, ctx.getRenderTile().matrix, ctx.getElevation());
+        if (anchor.second > 0.0f && std::abs(anchor.first.x) <= 1.0f && std::abs(anchor.first.y) <= 1.0f) {
+            placements.erase(symbolInstance.getCrossTileID());
+            const JointPlacement hidden(false, false, false);
+            placements.emplace(symbolInstance.getCrossTileID(), hidden);
+            return hidden;
+        }
+    }
     const SymbolBucket& bucket = ctx.getBucket();
     const mat4& posMatrix = ctx.getRenderTile().matrix;
     const auto& collisionGroup = ctx.collisionGroup;
