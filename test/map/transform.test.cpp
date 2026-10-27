@@ -1,6 +1,7 @@
 #include <mln/test/util.hpp>
 
 #include <gmock/gmock.h>
+#include <algorithm>
 #include <cmath>
 #include <mln/map/transform.hpp>
 #include <mln/math/angles.hpp>
@@ -781,6 +782,85 @@ TEST(Transform, CameraSetFromACancelledTransitionsDidChangeFinishesItOnce) {
     const CameraOptions camera = transform.getCameraOptions(std::nullopt);
     EXPECT_NEAR(30.0, *camera.pitch, 1e-9);
     EXPECT_NEAR(90.0, *camera.bearing, 1e-9);
+}
+
+// A pitch bound changed while a move runs, as Map::setBounds from onCameraIsChanging changes it:
+// each frame keeps within the bound as it is, and the pitch goes back to the one asked for when the
+// bound that held it moves away again. flyTo's frames (and so easeTo's without LatLngBounds) kept
+// to no bound, and easeTo's own kept to no minimum, and let go of a maximum that rose again where
+// the pitch was where the move had held it.
+TEST(Transform, MoveKeepsToAPitchBoundThatChangesWhileItRuns) {
+    enum class Move {
+        FlyTo,
+        EaseTo,
+        EaseToWithinLatLngBounds
+    };
+    struct Bound {
+        double toPitch; // the pitch the move asks for, from 60 degrees
+        bool minimum;   // a minimum, from 0 degrees, or a maximum, from 60
+        double held;    // the bound it moves to and back from
+    };
+    // How far the bound has moved, at `ms` into the move: not at all until 100 ms, all the way from
+    // 300 ms to 600 ms, and back where it started from 800 ms.
+    const auto shift = [](int ms) {
+        return std::clamp((ms - 100) / 200.0, 0.0, 1.0) * std::clamp((800 - ms) / 200.0, 0.0, 1.0);
+    };
+    for (const Move move : {Move::FlyTo, Move::EaseTo, Move::EaseToWithinLatLngBounds}) {
+        for (const Bound bound : {Bound{60, false, 20}, Bound{45, false, 20}, Bound{0, true, 40}}) {
+            SCOPED_TRACE(::testing::Message() << "move " << static_cast<int>(move) << " to pitch " << bound.toPitch
+                                              << (bound.minimum ? " under a minimum" : " under a maximum"));
+            CameraEventLog observer;
+            Transform transform(observer);
+            transform.resize({1000, 1000});
+            if (move == Move::EaseToWithinLatLngBounds) {
+                // easeTo eases with frames of its own within LatLngBounds, and with flyTo's without.
+                transform.setLatLngBounds(LatLngBounds::hull({-10, -10}, {10, 10}));
+            }
+            transform.jumpTo(CameraOptions().withCenter(LatLng{0, 0}).withZoom(10).withPitch(60));
+
+            int finished = 0;
+            AnimationOptions animation(Seconds(1));
+            animation.transitionFinishFn = [&] {
+                ++finished;
+            };
+            const CameraOptions to = CameraOptions().withCenter(LatLng{0, 1}).withZoom(10).withPitch(bound.toPitch);
+            if (move == Move::FlyTo) {
+                transform.flyTo(to, animation);
+            } else {
+                transform.easeTo(to, animation);
+            }
+            const TimePoint start = transform.getTransitionStart();
+
+            int ms = 0;
+            std::optional<double> pitchWhileHeld;
+            observer.isChanging = [&] {
+                const double pitch = util::rad2deg(transform.getPitch());
+                EXPECT_LE(pitch, util::rad2deg(transform.getState().getMaxPitch()) + 1e-9) << ms << " ms";
+                EXPECT_GE(pitch, util::rad2deg(transform.getState().getMinPitch()) - 1e-9) << ms << " ms";
+                if (ms >= 500 && !pitchWhileHeld) {
+                    pitchWhileHeld = pitch;
+                }
+                if (bound.minimum) {
+                    transform.setMinPitch(bound.held * shift(ms));
+                } else {
+                    transform.setMaxPitch(60.0 - (60.0 - bound.held) * shift(ms));
+                }
+            };
+            for (ms = 16; transform.inTransition() && ms < 2000; ms += 16) {
+                transform.updateTransitions(start + Milliseconds(ms));
+            }
+
+            EXPECT_FALSE(transform.inTransition());
+            EXPECT_EQ(1, finished);
+            ASSERT_TRUE(pitchWhileHeld);
+            EXPECT_NEAR(bound.held, *pitchWhileHeld, 1e-9);
+            const CameraOptions camera = transform.getCameraOptions(std::nullopt);
+            EXPECT_NEAR(0.0, camera.center->latitude(), 1e-9);
+            EXPECT_NEAR(1.0, camera.center->longitude(), 1e-9);
+            EXPECT_NEAR(10.0, *camera.zoom, 1e-9);
+            EXPECT_NEAR(bound.toPitch, *camera.pitch, 1e-9);
+        }
+    }
 }
 
 TEST(Transform, DefaultTransform) {

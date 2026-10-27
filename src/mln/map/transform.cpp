@@ -195,10 +195,12 @@ void Transform::easeTo(const CameraOptions& inputCamera, const AnimationOptions&
                                      util::interpolate(startEdgeInsets.bottom(), padding.bottom(), t),
                                      util::interpolate(startEdgeInsets.right(), padding.right(), t)});
             }
-            double maxPitch = getMaxPitchForEdgeInsets(state.getEdgeInsets());
-            if (pitch != startPitch || maxPitch < startPitch) {
-                state.setPitch(std::min(maxPitch, util::interpolate(startPitch, pitch, t)));
-            }
+            // Within the pitch bounds as they are at this frame: they can change while the move runs
+            // (Map::setBounds from onCameraIsChanging, as an app bounding the pitch by the zoom does).
+            // Toward the pitch asked for, and back up to it when a bound that held it down rises again.
+            const double maxPitch = getMaxPitchForEdgeInsets(state.getEdgeInsets());
+            const double framePitch = pitch != startPitch ? util::interpolate(startPitch, pitch, t) : startPitch;
+            state.setPitch(util::clamp(framePitch, state.getMinPitch(), maxPitch));
             if (roll != startRoll) {
                 state.setRoll(util::interpolate(startRoll, roll, t));
             }
@@ -388,9 +390,9 @@ void Transform::flyTo(const CameraOptions& inputCamera,
                                      util::interpolate(startEdgeInsets.right(), padding.right(), k)});
             }
 
-            if (pitch != startPitch) {
-                state.setPitch(util::interpolate(startPitch, pitch, k));
-            }
+            // Within the pitch bounds as they are at this frame, as in easeTo.
+            const double framePitch = pitch != startPitch ? util::interpolate(startPitch, pitch, k) : startPitch;
+            state.setPitch(util::clamp(framePitch, state.getMinPitch(), state.getMaxPitch()));
             if (roll != startRoll) {
                 state.setPitch(util::interpolate(startRoll, roll, k));
             }
@@ -669,6 +671,23 @@ bool Transform::inTransition() const {
     return transitionFrameFn != nullptr;
 }
 
+bool Transform::isUpdatingTransition() const {
+    // Until a camera set from the frame's callbacks starts a transition or cancels this one.
+    return updatingTransitionGeneration == transitionGeneration;
+}
+
+void Transform::clampToBounds() {
+    const double zoom = getZoom();
+    const double boundedZoom = util::clamp(zoom, state.getMinZoom(), state.getMaxZoom());
+    if (boundedZoom != zoom) {
+        // The centre altitude in metres, as a transition's frames keep it.
+        const double centerAltitude = state.getCenterAltitude();
+        state.setLatLngZoom(getLatLng(LatLng::Unwrapped), boundedZoom);
+        state.setCenterAltitude(centerAltitude);
+    }
+    state.setPitch(util::clamp(getPitch(), state.getMinPitch(), state.getMaxPitch()));
+}
+
 void Transform::updateTransitions(const TimePoint& now) {
     // Use a temporary function to ensure that the transitionFrameFn lambda is
     // called only once per update.
@@ -692,7 +711,15 @@ void Transform::updateTransitions(const TimePoint& now) {
     auto transition = std::move(transitionFrameFn);
     transitionFrameFn = nullptr;
 
-    const bool complete = transition && transition(now);
+    bool complete = false;
+    if (transition) {
+        // Held here, the transition is not inTransition() while its frame runs, so this tells the
+        // frame's callbacks that it is under way (isUpdatingTransition). Put back after, for the
+        // frame of an update that a callback ran within another's.
+        const auto outer = std::exchange(updatingTransitionGeneration, generation);
+        complete = transition(now);
+        updatingTransitionGeneration = outer;
+    }
     if (transitionGeneration != generation) {
         // A camera set from the frame's callbacks (an observer's onCameraIsChanging) started a
         // transition or cancelled this one, and either finished it. Put back, its frame would run
