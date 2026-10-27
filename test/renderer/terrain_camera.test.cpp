@@ -940,6 +940,34 @@ TEST(TerrainCamera, RefusedAltitudeChangeDuringATransitionKeepsItsCentre) {
     EXPECT_NEAR(*camera.centerAltitude, westPlateauMeters, 5.0);
 }
 
+// So for an anchor on the ground (a gesture beginning) that cuts a transition short: it keeps the
+// view, and once the ground under it changes the clamp keeps the camera, not that transition's centre.
+TEST(TerrainCamera, AnchorDuringATransitionLeavesTheCameraToKeep) {
+    TerrainTransitionTest test;
+    ASSERT_TRUE(test.settleOnPlateau());
+
+    bool anchored = false;
+    ASSERT_TRUE(test.easeWest([&](bool finished) {
+        if (!finished && !anchored && test.map.getCameraOptions({}).center->longitude() < -5.0) {
+            test.map.anchorCenterOnTerrain();
+            anchored = true;
+        }
+    }));
+    ASSERT_TRUE(anchored);
+    ASSERT_NEAR(test.altitude(), westPlateauMeters, 5.0) << "anchored on the plateau";
+    const vec3 rested = test.eye();
+
+    test.map.getStyle().getTerrain()->setExaggeration(1.1f);
+    for (int i = 0; i < 20; ++i) {
+        test.renderFrame();
+    }
+    EXPECT_NEAR(test.altitude(), westPlateauMeters * 1.1, 5.0);
+    const vec3 actual = test.eye();
+    for (int i = 0; i < 3; ++i) {
+        EXPECT_NEAR(actual[i], rested[i], mercatorMetre) << "axis " << i;
+    }
+}
+
 // A jump to a centre while a transition runs arrives over other ground than the height the clamp
 // was holding for the transition: the clamp puts that centre on the ground under it, not at the
 // held height.
