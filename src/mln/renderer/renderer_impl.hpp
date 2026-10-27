@@ -109,15 +109,13 @@ private:
     // point the DEM source is resolved) a bounded number of times so a genuinely empty
     // cover cannot spin forever.
     int terrainCoverRetryFrames = 4;
-    /// Last terrain height reported under the map centre, and the terrain it was sampled on, so an
-    /// unchanged surface does not post an observer message every frame. Empty while there is no
-    /// terrain, and a terrain other than the one sampled reports afresh: the first height of a
-    /// terrain that returns, or that replaces another between two frames, is reported even where it
-    /// is the one reported before. The height is NaN after a report that the ground under the
-    /// centre is unknown.
+    /// Last terrain height reported under the map centre (none: unknown), and the terrain it was
+    /// sampled on, so an unchanged surface does not post an observer message every frame. Empty
+    /// while there is no terrain: the first height of a terrain that returns, or that replaces
+    /// another between two frames (a style reload), is reported even where it is the one before.
     struct ReportedCenterElevation {
         Immutable<style::Terrain::Impl> terrain;
-        double elevation;
+        std::optional<double> elevation;
     };
     std::optional<ReportedCenterElevation> lastReportedCenterElevation;
 
