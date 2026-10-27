@@ -3,6 +3,8 @@
 #include <mln/gfx/context_observer.hpp>
 #include <mln/renderer/render_orchestrator.hpp>
 #include <mln/renderer/texture_pool.hpp>
+#include <mln/style/terrain_impl.hpp>
+#include <mln/util/immutable.hpp>
 
 #if MLN_RENDER_BACKEND_METAL
 #include <mln/mtl/mtl_fwd.hpp>
@@ -107,11 +109,17 @@ private:
     // point the DEM source is resolved) a bounded number of times so a genuinely empty
     // cover cannot spin forever.
     int terrainCoverRetryFrames = 4;
-    /// Last terrain height reported under the map centre, so an unchanged surface does not
-    /// post an observer message every frame. Empty while there is no terrain, so the first
-    /// height of a terrain that returns is reported even where it is the one reported before.
-    /// NaN after a report that the ground under the centre is unknown.
-    std::optional<double> lastReportedCenterElevation;
+    /// Last terrain height reported under the map centre, and the terrain it was sampled on, so an
+    /// unchanged surface does not post an observer message every frame. Empty while there is no
+    /// terrain, and a terrain other than the one sampled reports afresh: the first height of a
+    /// terrain that returns, or that replaces another between two frames, is reported even where it
+    /// is the one reported before. The height is NaN after a report that the ground under the
+    /// centre is unknown.
+    struct ReportedCenterElevation {
+        Immutable<style::Terrain::Impl> terrain;
+        double elevation;
+    };
+    std::optional<ReportedCenterElevation> lastReportedCenterElevation;
 
     /// The terrain height copy last handed to the observer (null: none, or terrain off), so it
     /// is sent once per change rather than once per frame.
