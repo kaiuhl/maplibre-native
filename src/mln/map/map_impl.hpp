@@ -154,11 +154,15 @@ public:
     /// (the style's default no longer applies), runs a return to sea level still waiting, and
     /// records whether the camera is being set to a centre (cameraSetToCenter).
     void beginCameraChange(bool toCenter);
+    /// After a camera set that moved the centre at once from `before` (a jump, a free camera, a
+    /// still render's camera): forgets the height reported under it until the next frame reports one.
+    void forgetGroundUnderCenterIfMoved(const LatLng& before);
     /// The ground changed while a transition or a gesture moved the camera; the clamp puts the
     /// centre on it once neither does (onUpdate).
     bool centerAwaitingTerrainAnchor = false;
-    /// The clamp, keeping the camera, found no ground on the line of sight in the map-side heights;
-    /// it tries again when they change (onTerrainElevationIndexChanged).
+    /// The clamp found no ground on the line of sight, or under the centre, in the map-side heights
+    /// (nor, for the centre, a reported height); it tries again when they change
+    /// (onTerrainElevationIndexChanged).
     bool centerAwaitingHeights = false;
     /// Whether the camera was last set to a centre (easeTo, flyTo or jumpTo with one) and not cut
     /// short of it, rather than moved relative to the view (moveBy, rotateBy, a zoom or turn around

@@ -535,7 +535,11 @@ struct TerrainTransitionTest {
             const bool west = tile && tile->z == 2 && tile->x == 1;
             // The coarser tiles that cover the plateau too: z1's western half, and z0.
             const bool overWest = tile && (tile->z == 0 || (tile->z == 1 && tile->x == 0));
-            if ((west && (holdWest || holdWestEntirely)) || (overWest && holdWestEntirely)) {
+            // East of 90°E, and the coarser tiles over it.
+            const bool farEast = tile && ((tile->z == 2 && tile->x == 3) || (tile->z == 1 && tile->x == 1) ||
+                                          tile->z == 0);
+            if ((west && (holdWest || holdWestEntirely)) || (overWest && holdWestEntirely) ||
+                (farEast && holdFarEast)) {
                 return std::nullopt; // still on its way
             }
             Response res;
@@ -639,6 +643,8 @@ struct TerrainTransitionTest {
     // While set, no tile with heights for the plateau arrives, coarser ones included: the ground
     // there is unknown.
     bool holdWestEntirely = false;
+    // While set, no tile with heights east of 90°E arrives.
+    bool holdFarEast = false;
     vec3 eyeAtEnd{};
     LatLng centerAtEnd;
 };
@@ -1183,6 +1189,34 @@ TEST(TerrainCamera, JumpOverUnloadedGroundHoldsTheCentreThenEases) {
 
     EXPECT_GE(test.millisecondsRisingOntoWestPlateau(), 300.0);
     EXPECT_NEAR(test.altitude(), westPlateauMeters, 5.0);
+}
+
+// A jump moves the centre off the ground the height last reported is for. Over ground whose heights
+// haven't arrived, the centre is held where the jump left it until they do, not put at the height
+// of the ground it left: a jump to the far east during a fling across the 2000 m plateau put the
+// centre 1000 m up, at the plateau's height.
+TEST(TerrainCamera, JumpOverUnloadedGroundForgetsTheHeightLeftBehind) {
+    TerrainTransitionTest test;
+    test.holdFarEast = true;
+    ASSERT_TRUE(test.settleOnPlateau());
+
+    const LatLng farEast{47.2692, 120.0};
+    bool jumped = false;
+    ASSERT_TRUE(test.runTransition(
+        [&](const AnimationOptions& animation) { test.map.moveBy({200.0, 0.0}, animation); },
+        [&](bool finished) {
+            // Well over the plateau, its height reported.
+            if (!finished && !jumped && test.map.getCameraOptions({}).center->longitude() < -15.0) {
+                test.map.jumpTo(CameraOptions().withCenter(farEast));
+                jumped = true;
+            }
+        }));
+    ASSERT_TRUE(jumped);
+    for (int i = 0; i < 20; ++i) {
+        test.renderFrame();
+    }
+    ASSERT_FALSE(test.map.getTerrainElevation(farEast)) << "the heights there are still on their way";
+    EXPECT_NEAR(test.altitude(), plateauMeters, 1.0) << "held at the height the fling kept";
 }
 
 // Ground at sea level is ground all the same: a centre over it goes onto it.

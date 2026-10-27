@@ -87,7 +87,9 @@ void Map::renderStill(StillImageCallback callback) {
 void Map::renderStill(const CameraOptions& camera, MapDebugOptions debugOptions, StillImageCallback callback) {
     impl->debugOptions = debugOptions;
     impl->beginCameraChange(camera.center.has_value());
+    const LatLng before = impl->transform.getLatLng();
     impl->transform.jumpTo(camera);
+    impl->forgetGroundUnderCenterIfMoved(before);
     renderStill(std::move(callback));
 }
 
@@ -621,7 +623,9 @@ void Map::dumpDebugLogs() const {
 void Map::setFreeCameraOptions(const FreeCameraOptions& camera) {
     // A camera put where it is, not a centre: the clamp keeps it (onUpdate).
     impl->beginCameraChange(false);
+    const LatLng before = impl->transform.getLatLng();
     impl->transform.setFreeCameraOptions(camera);
+    impl->forgetGroundUnderCenterIfMoved(before);
     impl->onUpdate();
 }
 
