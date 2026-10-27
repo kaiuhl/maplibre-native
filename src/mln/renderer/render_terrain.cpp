@@ -989,10 +989,10 @@ std::optional<double> RenderTerrain::getElevationForLatLng(const LatLng& latLng)
         return held;
     }
     // No tile the source holds for the cover contains the point, but its cache may: the cover
-    // leaves out ground that rises above the camera, so a camera put below the terrain (a centre
-    // at sea level over high ground at a high zoom, when the terrain is turned on or its DEM
-    // arrives) is never shown the ground it is in. The cached tile's height is what lets the
-    // clamp raise the camera out of it (Map::setCenterClampedToGround).
+    // leaves out ground that rises above the camera, all of it around a camera put below the
+    // terrain. It always includes the tile under the centre, in view or not
+    // (TileParameters::coverCenter), whose height lets the clamp raise such a camera out of the
+    // ground (Map::setCenterClampedToGround).
     return sampleDeepest(loadedDEMTiles(demSource, true));
 }
 
