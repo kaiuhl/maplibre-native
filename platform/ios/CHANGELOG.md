@@ -4,6 +4,7 @@ MapLibre welcomes participation and contributions from everyone. Please read [`M
 
 ## main
 
+- Fix an animated camera move going to its destination in one frame when the camera is set from `-mapView:regionIsChangingWithReason:` or `-mapViewRegionIsChanging:` while it runs, as setting `maximumPitch` below the camera's pitch does. The camera set now cancels the move where it is, as one set at any other time does.
 - With 3D terrain, pinch, rotate and two-finger tilt gestures turn around the ground under the middle of the screen instead of a sea-level point beneath it, and a pan over high ground no longer jumps the map along the view. Removing the terrain brings the centre back to sea level without moving the camera. After a gesture with terrain, camera changes the app makes keep the centre altitude the gesture set; set the altitude explicitly to place the centre elsewhere ([#4711](https://github.com/maplibre/maplibre-native/pull/4711)).
 - Add `MLNMapView.centerAltitude` and `-[MLNMapView setCenterAltitudeKeepingView:]`. With 3D terrain, a center coordinate and zoom level describe the same view only at the same center altitude, so save the altitude with a camera and restore it before setting the camera back ([#4712](https://github.com/maplibre/maplibre-native/pull/4712)).
 - With 3D terrain on and the centre clamp enabled, the clamp no longer cancels a running camera animation; the camera is anchored to the ground once the animation ends ([#4768](https://github.com/maplibre/maplibre-native/pull/4768)).

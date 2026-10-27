@@ -158,6 +158,9 @@ private:
     Duration transitionDuration;
     std::function<bool(const TimePoint)> transitionFrameFn;
     std::function<void()> transitionFinishFn;
+    /// Counts the transitions started and cancelled, so that updateTransitions can tell that a
+    /// camera set from its frame's callbacks (onCameraIsChanging) ended the transition it runs.
+    uint64_t transitionGeneration = 0;
 };
 
 } // namespace mln

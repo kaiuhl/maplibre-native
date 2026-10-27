@@ -669,6 +669,120 @@ TEST(Transform, IsPanning) {
     transform.updateTransitions(transform.getTransitionStart() + transform.getTransitionDuration());
 }
 
+namespace {
+// Logs the camera events a transform sends ("willA is didA willI didI "), and sets the camera from
+// them as an app's camera callbacks might.
+struct CameraEventLog : public mln::TransformObserver {
+    std::string log;
+    std::function<void()> isChanging;
+    std::function<void(MapObserver::CameraChangeMode)> didChange;
+
+    void onCameraWillChange(MapObserver::CameraChangeMode mode) override {
+        log += mode == MapObserver::CameraChangeMode::Animated ? "willA " : "willI ";
+    }
+    void onCameraIsChanging() override {
+        log += "is ";
+        if (isChanging) isChanging();
+    }
+    void onCameraDidChange(MapObserver::CameraChangeMode mode) override {
+        log += mode == MapObserver::CameraChangeMode::Animated ? "didA " : "didI ";
+        if (didChange) didChange(mode);
+    }
+};
+} // namespace
+
+// A camera set from an observer's onCameraIsChanging while an animated move runs (an app's
+// region-is-changing callback) cancels the move there, as one set from anywhere else does: the
+// move finishes once, then and there, and the camera stays as the set left it. The move ran on
+// from its frame instead, without a finish, and after a jump with the jump's duration of zero,
+// which took it to its destination on the next frame.
+TEST(Transform, CameraSetFromCameraIsChangingCancelsTheTransition) {
+    for (const bool jump : {true, false}) {
+        SCOPED_TRACE(jump ? "jumpTo" : "cancelTransitions");
+        CameraEventLog observer;
+        Transform transform(observer);
+        transform.resize({1000, 1000});
+        transform.jumpTo(CameraOptions().withCenter(LatLng{0, 0}).withZoom(10).withPitch(60));
+        observer.log.clear();
+
+        int finished = 0;
+        AnimationOptions animation(Seconds(1));
+        animation.transitionFinishFn = [&] {
+            ++finished;
+        };
+        transform.easeTo(CameraOptions().withCenter(LatLng{0, 1}), animation);
+        const TimePoint start = transform.getTransitionStart();
+
+        std::optional<LatLng> setAt;
+        observer.isChanging = [&] {
+            if (setAt) return;
+            if (jump) {
+                transform.jumpTo(CameraOptions().withPitch(30));
+            } else {
+                transform.cancelTransitions();
+            }
+            setAt = transform.getLatLng();
+        };
+        transform.updateTransitions(start + Milliseconds(250));
+        ASSERT_TRUE(setAt);
+        EXPECT_GT(setAt->longitude(), 0.0);
+        EXPECT_LT(setAt->longitude(), 1.0);
+        EXPECT_FALSE(transform.inTransition());
+        EXPECT_EQ(1, finished);
+
+        for (const int ms : {300, 500, 1000, 1500}) {
+            transform.updateTransitions(start + Milliseconds(ms));
+            EXPECT_DOUBLE_EQ(setAt->longitude(), transform.getLatLng().longitude()) << ms << " ms";
+        }
+        EXPECT_FALSE(transform.inTransition());
+        EXPECT_EQ(1, finished);
+        EXPECT_NEAR(jump ? 30.0 : 60.0, *transform.getCameraOptions(std::nullopt).pitch, 1e-9);
+        EXPECT_EQ(jump ? "willA is didA willI didI " : "willA is didA ", observer.log);
+    }
+}
+
+// A camera set again from the did-change of a move that a set from onCameraIsChanging cancelled:
+// the move still finishes once. Its finish ran again for the second set, which replaced it while
+// it ran.
+TEST(Transform, CameraSetFromACancelledTransitionsDidChangeFinishesItOnce) {
+    CameraEventLog observer;
+    Transform transform(observer);
+    transform.resize({1000, 1000});
+    transform.jumpTo(CameraOptions().withCenter(LatLng{0, 0}).withZoom(10).withPitch(60));
+    observer.log.clear();
+
+    int finished = 0;
+    AnimationOptions animation(Seconds(1));
+    animation.transitionFinishFn = [&] {
+        ++finished;
+    };
+    transform.easeTo(CameraOptions().withCenter(LatLng{0, 1}), animation);
+    const TimePoint start = transform.getTransitionStart();
+
+    bool tilted = false;
+    bool turned = false;
+    observer.isChanging = [&] {
+        if (tilted) return;
+        tilted = true;
+        transform.jumpTo(CameraOptions().withPitch(30));
+    };
+    observer.didChange = [&](MapObserver::CameraChangeMode mode) {
+        if (turned || mode != MapObserver::CameraChangeMode::Animated) return;
+        turned = true;
+        transform.jumpTo(CameraOptions().withBearing(90));
+    };
+    transform.updateTransitions(start + Milliseconds(250));
+    transform.updateTransitions(start + Milliseconds(1500));
+
+    EXPECT_TRUE(turned);
+    EXPECT_FALSE(transform.inTransition());
+    EXPECT_EQ(1, finished);
+    EXPECT_EQ("willA is didA willI didI willI didI ", observer.log);
+    const CameraOptions camera = transform.getCameraOptions(std::nullopt);
+    EXPECT_NEAR(30.0, *camera.pitch, 1e-9);
+    EXPECT_NEAR(90.0, *camera.bearing, 1e-9);
+}
+
 TEST(Transform, DefaultTransform) {
     struct TransformObserver : public mln::TransformObserver {
         void onCameraWillChange(MapObserver::CameraChangeMode) final { cameraWillChangeCallback(); };
