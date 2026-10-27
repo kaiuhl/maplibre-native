@@ -738,7 +738,6 @@ void Transform::retargetTransitionCenterAltitude(double altitudeMeters) {
         return;
     }
     CenterAltitudeEase& ease = centerAltitudeEase;
-    const double k = ease.progress;
     if (altitudeMeters == ease.target) {
         return;
     }
@@ -746,22 +745,25 @@ void Transform::retargetTransitionCenterAltitude(double altitudeMeters) {
     // took long, as one does while new tiles arrive, all of it): heights that arrived in the last
     // 0.2 s of a flight moved the view by hundreds of points on one frame. The rest of the way goes
     // on the clock instead, from the altitude the last frame drew, over centerAltitudeEaseDuration,
-    // and the transition lingers past its end until it has arrived. So does a target that changes
-    // again on the way. On the frames' clock, which the map gives them (a still render draws them
-    // all at once), from the time the last one drew.
+    // and the transition lingers past its end until it has arrived. On the frames' clock, which the
+    // map gives them (a still render draws them all at once), from the time the last one drew.
     const TimePoint now = transitionFrameTime;
-    if (ease.clockStart || transitionStart + transitionDuration - now < centerAltitudeEaseDuration) {
+    if (!ease.clockStart && transitionStart + transitionDuration - now < centerAltitudeEaseDuration) {
         ease.from = state.getCenterAltitude();
+        ease.fromProgress = 0.0;
         ease.target = altitudeMeters;
         ease.clockStart = now;
         return;
     }
+    // From the altitude reached, the rest of the way to the new target over what is left of the
+    // transition, or of the ease on the clock: a target that changes again on the way (a finer
+    // tile arriving) carries on at the pace the altitude has, where restarting the ease stopped it
+    // and kept the transition going another 0.4 s for every change.
+    const double k = ease.clockStart ? ease.clockProgress(now) : ease.progress;
     if (k >= 1.0) {
         return;
     }
-    // From the altitude reached at k, the rest of the way to the new target over what is left of
-    // the transition.
-    ease.from = ease.at(k, now);
+    ease.from = ease.at(ease.progress, now);
     ease.fromProgress = k;
     ease.target = altitudeMeters;
 }
@@ -775,11 +777,15 @@ double Transform::transitionCenterAltitude(double k) {
     return centerAltitudeEase.at(k, transitionFrameTime);
 }
 
+double Transform::CenterAltitudeEase::clockProgress(TimePoint now) const {
+    const double elapsed = std::chrono::duration<double>(now - *clockStart) /
+                           std::chrono::duration<double>(centerAltitudeEaseDuration);
+    return centerAltitudeEasing.solve(std::clamp(elapsed, 0.0, 1.0), 1e-6);
+}
+
 double Transform::CenterAltitudeEase::at(double k, TimePoint now) const {
     if (clockStart) {
-        const double elapsed = std::chrono::duration<double>(now - *clockStart) /
-                               std::chrono::duration<double>(centerAltitudeEaseDuration);
-        return util::interpolate(from, target, centerAltitudeEasing.solve(std::clamp(elapsed, 0.0, 1.0), 1e-6));
+        k = clockProgress(now);
     }
     // Kept as a fraction of what is left rather than as gl-js's extrapolated start, which a new
     // target close to the end would put out of all proportion and the last frame then misses.

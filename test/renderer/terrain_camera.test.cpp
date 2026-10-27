@@ -839,6 +839,31 @@ TEST(TerrainCamera, LateGroundEasesOnTheFramesClock) {
     EXPECT_DOUBLE_EQ(transform.getState().getCenterAltitude(), 1000.0);
 }
 
+// Ground that changes again while the centre eases onto late ground (a finer tile arriving) is eased
+// onto from where the altitude has got to, at the pace it has, within the same 0.4 s. Restarted from
+// rest, the altitude stopped, and each change kept the move going 0.4 s more.
+TEST(TerrainCamera, LateGroundChangingAgainKeepsTheEase) {
+    Transform transform;
+    transform.resize({512, 512});
+    transform.jumpTo(CameraOptions().withCenter(LatLng(0.0, 0.0)).withZoom(10.0).withCenterAltitude(0.0));
+    transform.easeTo(CameraOptions().withCenter(LatLng(0.0, 0.01)).withCenterAltitude(0.0),
+                     AnimationOptions(Seconds(1)));
+    const TimePoint start = transform.getTransitionStart();
+    transform.updateTransitions(start + Milliseconds(900));
+    transform.retargetTransitionCenterAltitude(1000.0);
+    // Half way through the 0.4 s ease, the ground changes again.
+    transform.updateTransitions(start + Milliseconds(1100));
+    const double halfWay = transform.getState().getCenterAltitude();
+    ASSERT_NEAR(halfWay, 500.0, 1.0);
+    transform.retargetTransitionCenterAltitude(1200.0);
+
+    transform.updateTransitions(start + Milliseconds(1150));
+    EXPECT_GT(transform.getState().getCenterAltitude() - halfWay, 100.0) << "on the move";
+    transform.updateTransitions(start + Milliseconds(1300));
+    EXPECT_FALSE(transform.inTransition());
+    EXPECT_DOUBLE_EQ(transform.getState().getCenterAltitude(), 1200.0);
+}
+
 // The same for a free camera set while a transition runs: it stays where it was put.
 TEST(TerrainCamera, FreeCameraSetDuringATransitionIsKept) {
     TerrainTransitionTest test;

@@ -126,8 +126,9 @@ public:
     std::optional<LatLng> getTransitionCenter() const;
     /// Moves the centre altitude a running transition arrives at to `altitudeMeters`, carrying on
     /// from the altitude it has reached so that nothing jumps (gl-js's Camera._updateElevation):
-    /// over what is left of the transition, or over 0.4 s at least, the transition lingering past
-    /// its end for it. Nothing without a transition.
+    /// over what is left of the transition, or, with less than 0.4 s left, over 0.4 s, the
+    /// transition lingering past its end for it. A target that changes again in those 0.4 s goes
+    /// on within them. Nothing without a transition.
     void retargetTransitionCenterAltitude(double altitudeMeters);
 
     // Gesture
@@ -179,9 +180,9 @@ private:
     TimePoint transitionFrameTime;
     /// The centre altitude the running transition eases to, how far along it is (the fraction its
     /// frame was last given), and the centre it was given. A new target carries on from the
-    /// altitude reached at `fromProgress`, from `from`; or, set late, from `from` at `clockStart`
-    /// on the clock, over centerAltitudeEaseDuration, the transition lingering past its end until
-    /// then (lingersAt).
+    /// altitude reached at `fromProgress`, from `from`. Set late, the progress is that of an ease
+    /// over centerAltitudeEaseDuration from `clockStart` instead (clockProgress), the transition
+    /// lingering past its end until it is through (lingersAt).
     struct CenterAltitudeEase {
         double from = 0.0;
         double target = 0.0;
@@ -190,6 +191,7 @@ private:
         std::optional<LatLng> center;
         std::optional<TimePoint> clockStart;
         double at(double k, TimePoint now) const;
+        double clockProgress(TimePoint now) const;
         bool lingersAt(TimePoint now) const;
     };
     CenterAltitudeEase centerAltitudeEase;
