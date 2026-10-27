@@ -782,8 +782,8 @@ TEST(TerrainCamera, TiltInPlaceEasesTheCentreAltitude) {
 
 // Heights that arrive in the last frames of a move were eased onto over what was left of it, a frame
 // or two, and the view moved by hundreds of points on one of them (Timberline, 351 pt, heights 0.1 s
-// before the end). The rest of the way takes 0.4 s at least instead, the move running on past its
-// end until it is on the ground.
+// before the end). The rest of the way takes 0.4 s instead, the move running on past its end until
+// it is on the ground.
 TEST(TerrainCamera, GroundArrivingAtTheEndOfAMoveIsEasedOnto) {
     TerrainTransitionTest test;
     test.holdWest = true;
@@ -799,19 +799,25 @@ TEST(TerrainCamera, GroundArrivingAtTheEndOfAMoveIsEasedOnto) {
         },
         [&](bool) {
             rise.add(test.eye()[2]);
-            // 0.25 s before the 1.5 s move ends, the plateau's tiles arrive: their heights reach the
+            // 0.3 s before the 1.5 s move ends, the plateau's tiles arrive: their heights reach the
             // map a few frames later.
-            if (!released && Clock::now() - start >= Milliseconds(1250)) {
+            if (!released && Clock::now() - start >= Milliseconds(1200)) {
                 test.holdWest = false;
                 released = true;
             }
             std::this_thread::sleep_for(Milliseconds(16));
         }));
     ASSERT_TRUE(released);
+    // And after the move, where heights that came later than it would have the clamp move the camera.
+    for (const auto until = Clock::now() + Milliseconds(500); Clock::now() < until;) {
+        test.renderFrame();
+        rise.add(test.eye()[2]);
+        std::this_thread::sleep_for(Milliseconds(16));
+    }
 
     // On the plateau as the move ended, the 1000 m rise eased over 0.4 s, where it took what was left
-    // of the move, about 0.2 s.
-    EXPECT_GE(rise.milliseconds(), 300.0);
+    // of the move, under 0.3 s.
+    EXPECT_GE(rise.milliseconds(), 350.0);
     test.expectEyeAtEnd();
     EXPECT_NEAR(test.altitude(), westPlateauMeters, 5.0);
 }
