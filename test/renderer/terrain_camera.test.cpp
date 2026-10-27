@@ -535,8 +535,11 @@ struct TerrainTransitionTest {
               fileSource,
               MapOptions().withMapMode(MapMode::Continuous).withSize(frontend.getSize())) {
         fileSource->tileResponse = [this](const Resource& resource) -> std::optional<Response> {
-            const bool west = resource.tileData && resource.tileData->z == 2 && resource.tileData->x == 1;
-            if (west && holdWest) {
+            const auto& tile = resource.tileData;
+            const bool west = tile && tile->z == 2 && tile->x == 1;
+            // The coarser tiles that cover the plateau too: z1's western half, and z0.
+            const bool overWest = tile && (tile->z == 0 || (tile->z == 1 && tile->x == 0));
+            if ((west && (holdWest || holdWestEntirely)) || (overWest && holdWestEntirely)) {
                 return std::nullopt; // still on its way
             }
             Response res;
@@ -555,12 +558,13 @@ struct TerrainTransitionTest {
 
     double altitude() { return map.getCameraOptions({}).centerAltitude.value_or(0.0); }
 
-    // Renders until the clamp has put the centre on the 1000 m plateau under Innsbruck.
+    // Renders until the clamp has put the centre on the 1000 m plateau under Innsbruck, and is done
+    // moving it there: the first heights to arrive are eased onto.
     bool settleOnPlateau() {
         const auto deadline = Clock::now() + Seconds(10);
         while (Clock::now() < deadline) {
             renderFrame();
-            if (std::abs(altitude() - plateauMeters) < 5.0) {
+            if (std::abs(altitude() - plateauMeters) < 0.5 && !map.isPanning()) {
                 return true;
             }
         }
@@ -607,6 +611,22 @@ struct TerrainTransitionTest {
                              [](bool) {});
     }
 
+    // Lets the plateau's tiles arrive and renders at up to 60 frames a second until the centre is on
+    // the 2000 m plateau, or for five seconds: how long the camera took to rise onto it (Rise).
+    double millisecondsRisingOntoWestPlateau() {
+        holdWest = false;
+        holdWestEntirely = false;
+        Rise rise;
+        rise.add(eye()[2]);
+        const auto deadline = Clock::now() + Seconds(5);
+        while (Clock::now() < deadline && std::abs(altitude() - westPlateauMeters) > 1.0) {
+            renderFrame();
+            rise.add(eye()[2]);
+            std::this_thread::sleep_for(Milliseconds(16));
+        }
+        return rise.milliseconds();
+    }
+
     vec3 eye() const { return *map.getFreeCameraOptions().position; }
 
     // The camera is where the transition left it, to within a metre.
@@ -620,6 +640,9 @@ struct TerrainTransitionTest {
     const LatLng westTarget{47.2692, -30.0};
     // While set, the plateau's tiles don't arrive.
     bool holdWest = false;
+    // While set, no tile with heights for the plateau arrives, coarser ones included: the ground
+    // there is unknown.
+    bool holdWestEntirely = false;
     vec3 eyeAtEnd{};
     LatLng centerAtEnd;
 };
@@ -962,6 +985,69 @@ TEST(TerrainCamera, GroundArrivingAtTheEndOfAMoveIsEasedOnto) {
     EXPECT_GE(rise.milliseconds(), 300.0);
     test.expectEyeAtEnd();
     EXPECT_NEAR(test.altitude(), westPlateauMeters, 5.0);
+}
+
+// A move that ends over ground whose heights haven't arrived (a cold cache, an easeTo across the
+// Cascades at one zoom) has no ground under its centre. Put at sea level there, the whole view dove
+// hundreds of points and jumped back up once the heights arrived, seconds later (St Helens, Mt
+// Adams). The centre stays at the height the move left it at instead, and eases onto the ground
+// when it arrives, no frame of it a jump.
+TEST(TerrainCamera, MoveEndingOverUnloadedGroundHoldsTheCentreThenEases) {
+    TerrainTransitionTest test;
+    test.holdWestEntirely = true;
+    ASSERT_TRUE(test.settleOnPlateau());
+
+    ASSERT_TRUE(test.runTransition(
+        [&](const AnimationOptions& animation) {
+            test.map.easeTo(CameraOptions().withCenter(test.westTarget).withCenterAltitude(plateauMeters), animation);
+        },
+        [](bool) {}));
+    ASSERT_FALSE(test.map.getTerrainElevation(test.westTarget)) << "the plateau's heights are still on their way";
+
+    // Ten frames after the move ended, the camera is where the move left it.
+    test.expectEyeAtEnd();
+    EXPECT_NEAR(test.altitude(), plateauMeters, 1.0);
+
+    // Eased onto the plateau, 1000 m up, over 0.4 s, where a jump takes one frame.
+    EXPECT_GE(test.millisecondsRisingOntoWestPlateau(), 300.0);
+    EXPECT_NEAR(test.altitude(), westPlateauMeters, 5.0);
+}
+
+// The same for a jump to a centre over ground whose heights haven't arrived.
+TEST(TerrainCamera, JumpOverUnloadedGroundHoldsTheCentreThenEases) {
+    TerrainTransitionTest test;
+    test.holdWestEntirely = true;
+    ASSERT_TRUE(test.settleOnPlateau());
+
+    test.map.jumpTo(CameraOptions().withCenter(test.westTarget));
+    const vec3 jumped = test.eye();
+    for (int i = 0; i < 10; ++i) {
+        test.renderFrame();
+    }
+    ASSERT_FALSE(test.map.getTerrainElevation(test.westTarget)) << "the plateau's heights are still on their way";
+    const vec3 actual = test.eye();
+    for (int i = 0; i < 3; ++i) {
+        EXPECT_NEAR(actual[i], jumped[i], mercatorMetre) << "axis " << i;
+    }
+    EXPECT_NEAR(test.altitude(), plateauMeters, 1.0);
+
+    EXPECT_GE(test.millisecondsRisingOntoWestPlateau(), 300.0);
+    EXPECT_NEAR(test.altitude(), westPlateauMeters, 5.0);
+}
+
+// Ground at sea level is ground all the same: a centre over it goes onto it.
+TEST(TerrainCamera, GroundAtSeaLevelIsClampedTo) {
+    TerrainTransitionTest test;
+    test.highTile = makeDEMTile(0.0);
+    ASSERT_TRUE(test.settleOnPlateau());
+
+    test.map.jumpTo(CameraOptions().withCenter(test.westTarget));
+    const auto deadline = Clock::now() + Seconds(5);
+    while (Clock::now() < deadline && std::abs(test.altitude()) > 0.5) {
+        test.renderFrame();
+    }
+    ASSERT_TRUE(test.map.getTerrainElevation(test.westTarget));
+    EXPECT_NEAR(test.altitude(), 0.0, 0.5);
 }
 
 // The same for a free camera set while a transition runs: it stays where it was put.

@@ -110,6 +110,7 @@ private:
     /// Last terrain height reported under the map centre, so an unchanged surface does not
     /// post an observer message every frame. Empty while there is no terrain, so the first
     /// height of a terrain that returns is reported even where it is the one reported before.
+    /// NaN after a report that the ground under the centre is unknown.
     std::optional<double> lastReportedCenterElevation;
 
     /// The terrain height copy last handed to the observer (null: none, or terrain off), so it

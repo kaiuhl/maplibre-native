@@ -64,7 +64,7 @@ public:
     void onDidFinishRenderingFrame(RenderMode, bool, bool, std::shared_ptr<gfx::RenderingStats>) final;
     void onWillStartRenderingMap() final;
     void onDidFinishRenderingMap() final;
-    void onTerrainCenterElevationChanged(double elevationMeters) final;
+    void onTerrainCenterElevationChanged(std::optional<double> elevationMeters) final;
     void onTerrainElevationIndexChanged(std::shared_ptr<const TerrainElevationIndex>) final;
     void onStyleImageMissing(const std::string&, const std::function<void()>&) final;
     void onRemoveUnusedStyleImages(const std::vector<std::string>&) final;
@@ -127,7 +127,8 @@ public:
     /// pans. Opt in with Map::setCenterClampedToGround until it is applied during render
     /// setup instead, the way GL JS's recalculateZoomAndCenter is.
     bool centerClampedToGround = false;
-    /// Terrain height under the centre, as the renderer last reported it (NaN until then).
+    /// Terrain height under the centre, as the renderer last reported it: NaN until then, and while
+    /// no DEM tile covers the centre, where the ground is unknown rather than at sea level.
     double terrainCenterElevation = std::numeric_limits<double>::quiet_NaN();
     void anchorCenterOnTerrain();
     /// Slides the centre along the line of sight to `altitudeMeters`, the zoom following, so the
@@ -175,9 +176,15 @@ public:
     /// Puts the centre on the ground once nothing is moving the camera: keeping a centre the camera
     /// was set to, and otherwise the camera. True when it moved anything.
     bool settleCenterOnGround();
-    /// Moves the centre altitude to `elevationMeters` keeping lng/lat; false when the change
-    /// is under the sub-metre threshold.
+    /// Moves the centre altitude to `elevationMeters` keeping lng/lat, easing it there over
+    /// groundEaseDuration where it was held over unknown ground; false when the change is under the
+    /// sub-metre threshold, or where `elevationMeters` is NaN: the ground is unknown, and the centre
+    /// is held where it is.
     bool clampCenterToTerrain(double elevationMeters);
+    /// The clamp found the ground under the centre unknown when it would have put the centre on it,
+    /// and left the centre at the altitude it had; it eases the centre onto the ground once that
+    /// arrives, rather than jumping the view there.
+    bool centerHeldOverUnknownGround = false;
     /// The renderer's terrain heights, copied for this side (onTerrainElevationIndexChanged); null
     /// without terrain. Map's terrain projection reads it so it never waits on the renderer.
     std::shared_ptr<const TerrainElevationIndex> terrainElevationIndex;

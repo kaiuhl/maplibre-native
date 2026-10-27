@@ -13,6 +13,7 @@
 #include <exception>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 
 namespace mln {
@@ -75,8 +76,9 @@ public:
 
     /// The rendered terrain height under the map centre changed. Only the render side knows
     /// it - the DEM lives there - so a map that wants its centre to ride the terrain
-    /// (Map::setCenterClampedToGround) learns of it here, one frame behind.
-    virtual void onTerrainCenterElevationChanged(double /*elevationMeters*/) {}
+    /// (Map::setCenterClampedToGround) learns of it here, one frame behind. Nullopt where no DEM
+    /// tile covers the centre yet: the ground there is unknown, which is not ground at sea level.
+    virtual void onTerrainCenterElevationChanged(std::optional<double> /*elevationMeters*/) {}
 
     /// The renderer's set of loaded terrain heights changed: tiles loaded or evicted, the
     /// exaggeration changed, or terrain went on or off (null). The map answers height questions

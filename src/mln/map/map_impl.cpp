@@ -12,10 +12,18 @@
 #include <mln/util/action_journal.hpp>
 #include <mln/util/action_journal_impl.hpp>
 #include <mln/gfx/rendering_stats.hpp>
+#include <mln/util/unitbezier.hpp>
 
+#include <chrono>
 #include <cmath>
+#include <utility>
 
 namespace mln {
+
+namespace {
+// How long a centre held over unknown ground takes to ease onto the ground once its heights arrive.
+constexpr auto groundEaseDuration = std::chrono::milliseconds(400);
+} // namespace
 
 #if !defined(NDEBUG)
 namespace {
@@ -136,12 +144,13 @@ void Map::Impl::onUpdate() {
 
     // The clamp stood aside for a transition or a gesture (onTerrainCenterElevationChanged), or is
     // waiting for heights on the line of sight (settleCenterOnGround); now that neither is moving
-    // the camera, put the centre on the ground: once, at the end of a drag. The reported height
-    // outlives a terrain removed during the transition, so only apply it while there is still
-    // terrain.
+    // the camera, put the centre on the ground: once, at the end of a drag. Where the ground under
+    // the centre is unknown, the clamp holds the centre where the move left it. The reported
+    // height outlives a terrain removed during the transition, so only apply it while there is
+    // still terrain.
     if (centerAwaitingTerrainAnchor && !transform.inTransition() && !transform.isGestureInProgress()) {
         centerAwaitingTerrainAnchor = false;
-        if (centerClampedToGround && style->impl->getTerrain() && !std::isnan(terrainCenterElevation)) {
+        if (centerClampedToGround && style->impl->getTerrain()) {
             settleCenterOnGround();
         }
     }
@@ -462,6 +471,7 @@ void Map::Impl::keepCameraAboveTerrain() {
 
 void Map::Impl::returnCenterToSeaLevel() {
     centerAwaitingSeaLevel = false;
+    centerHeldOverUnknownGround = false;
     // Where the limits refuse the move that keeps the view, keep the centre and zoom instead, as
     // gl-js does (applyTerrainChange), rather than leave the centre up in the air.
     if (!setCenterAltitudeKeepingView(0.0) && transform.getState().getCenterAltitude() != 0.0) {
@@ -494,8 +504,10 @@ void Map::Impl::onTerrainElevationIndexChanged(std::shared_ptr<const TerrainElev
     terrainElevationIndex = std::move(index);
 }
 
-void Map::Impl::onTerrainCenterElevationChanged(double elevationMeters) {
-    terrainCenterElevation = elevationMeters;
+void Map::Impl::onTerrainCenterElevationChanged(std::optional<double> elevationMeters) {
+    // Unknown ground (no DEM tile covers the centre yet) is not sea level: the clamp holds the
+    // centre where it is over it (clampCenterToTerrain).
+    terrainCenterElevation = elevationMeters.value_or(std::numeric_limits<double>::quiet_NaN());
     if (!centerClampedToGround) {
         return;
     }
@@ -532,6 +544,8 @@ bool Map::Impl::settleCenterOnGround() {
     // does at the end of a terrain gesture.
     const double before = transform.getState().getCenterAltitude();
     if (const auto ground = groundOnLineOfSight()) {
+        // The camera stays, so there is nothing to ease for a centre that was held.
+        centerHeldOverUnknownGround = false;
         anchorCenterOnLineOfSight(*ground);
         return transform.getState().getCenterAltitude() != before;
     }
@@ -621,6 +635,15 @@ double Map::Impl::groundUnderCenter() const {
 }
 
 bool Map::Impl::clampCenterToTerrain(double elevationMeters) {
+    // No DEM tile covers the centre yet (a move that ends over ground whose heights are still on
+    // their way): the ground there is unknown. Put at sea level, the whole view dove hundreds of
+    // points and jumped back up once the heights arrived, seconds later. The centre stays at the
+    // altitude it has instead, and is eased onto the ground when that arrives.
+    if (std::isnan(elevationMeters)) {
+        centerHeldOverUnknownGround = true;
+        return false;
+    }
+    const bool held = std::exchange(centerHeldOverUnknownGround, false);
     // Sub-metre differences are the terrain cover shifting under a camera that just moved,
     // not the ground actually changing height; acting on them would chase itself.
     constexpr double minimumChangeMeters = 0.5;
@@ -629,7 +652,16 @@ bool Map::Impl::clampCenterToTerrain(double elevationMeters) {
     }
     // Raising the centre onto the terrain moves the orbit plane, not the centre's lng/lat,
     // so this settles rather than feeding back into the next frame's sample.
-    transform.jumpTo(CameraOptions().withCenterAltitude(elevationMeters));
+    if (!held) {
+        transform.jumpTo(CameraOptions().withCenterAltitude(elevationMeters));
+        return true;
+    }
+    // A held centre can be far off the ground that arrives (the altitude a move set out from):
+    // eased there, from rest to rest, rather than jumped. Given the centre, so that a move with
+    // one carries on onto the latest ground as it eases (easeTransitionOntoGround).
+    AnimationOptions animation(groundEaseDuration);
+    animation.easing.emplace(0.42, 0.0, 0.58, 1.0);
+    transform.easeTo(CameraOptions().withCenter(transform.getLatLng()).withCenterAltitude(elevationMeters), animation);
     return true;
 }
 
