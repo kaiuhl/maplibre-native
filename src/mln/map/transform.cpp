@@ -603,8 +603,13 @@ void Transform::startTransition(const CameraOptions& camera,
                                 const std::function<void(double)>& frame,
                                 const Duration& duration,
                                 const CenterAltitudeEase& altitudeEase) {
-    if (transitionFinishFn) {
-        transitionFinishFn();
+    // A camera set from the running transition's frame (onCameraIsChanging) ends that transition
+    // here, and updateTransitions must not put it back.
+    ++transitionGeneration;
+    // Taken out before it runs: a camera set from it (onCameraDidChange) starts a transition of
+    // its own, which would otherwise run it again and replace it while it runs.
+    if (auto finish = std::exchange(transitionFinishFn, nullptr)) {
+        finish();
     }
     // After the previous transition finishes, which may start another one.
     centerAltitudeEase = altitudeEase;
@@ -700,31 +705,39 @@ void Transform::updateTransitions(const TimePoint& now) {
     // crashes. It doesn't address any potential deeper issue (for example
     // user error, how often and when transition callbacks are called).
 
+    const uint64_t generation = transitionGeneration;
     auto transition = std::move(transitionFrameFn);
     transitionFrameFn = nullptr;
 
-    if (transition && transition(now)) {
+    const bool complete = transition && transition(now);
+    if (transitionGeneration != generation) {
+        // A camera set from the frame's callbacks (an observer's onCameraIsChanging) started a
+        // transition or cancelled this one, and either finished it. Put back, its frame would run
+        // on with the new transition's start and duration, a jump's zero taking it to its end on
+        // the next frame, and nothing would finish it.
+        return;
+    }
+
+    if (complete) {
         // If the transition indicates that it is complete, then we should call
         // the finish lambda (going via a temporary as above)
         auto finish = std::move(transitionFinishFn);
 
         transitionFinishFn = nullptr;
-        transitionFrameFn = nullptr;
 
         if (finish) {
             finish();
         }
-    } else if (!transitionFrameFn) {
-        // We have to check `transitionFrameFn` is nil here, since a new
-        // transition may have been triggered in a user callback (from the
-        // transition call above)
+    } else {
         transitionFrameFn = std::move(transition);
     }
 }
 
 void Transform::cancelTransitions() {
-    if (transitionFinishFn) {
-        transitionFinishFn();
+    // As in startTransition.
+    ++transitionGeneration;
+    if (auto finish = std::exchange(transitionFinishFn, nullptr)) {
+        finish();
     }
 
     transitionFrameFn = nullptr;

@@ -50,6 +50,7 @@
 #include <mln/util/timer.hpp>
 
 #include <atomic>
+#include <thread>
 
 using namespace mln;
 using namespace mln::style;
@@ -559,6 +560,64 @@ TEST(Map, DefaultBoundOptions) {
     EXPECT_EQ(*bounds.minZoom, util::MIN_ZOOM);
     EXPECT_EQ(*bounds.maxZoom, util::DEFAULT_MAX_ZOOM);
     EXPECT_EQ(*bounds.bounds, LatLngBounds());
+}
+
+// An app lowering the maximum pitch under the camera's from its camera-is-changing callback while
+// an animated move runs, as one whose bound follows the zoom does on every frame. The pitch is
+// clamped with a jump, which cancels the move where it is, as it does from anywhere else. The move
+// ran on with the jump's duration of zero instead, which took it to its destination on the next
+// frame, and nothing finished it.
+TEST(Map, SetBoundsFromCameraIsChangingCancelsTheTransition) {
+    struct Observer : MapObserver {
+        std::string log;
+        std::function<void()> isChanging;
+        void onCameraWillChange(CameraChangeMode mode) override {
+            log += mode == CameraChangeMode::Animated ? "willA " : "willI ";
+        }
+        void onCameraIsChanging() override {
+            if (isChanging) isChanging();
+        }
+        void onCameraDidChange(CameraChangeMode mode) override {
+            log += mode == CameraChangeMode::Animated ? "didA " : "didI ";
+        }
+    };
+
+    util::RunLoop runLoop;
+    Observer observer;
+    HeadlessFrontend frontend(1.0f);
+    MapAdapter map(frontend,
+                   observer,
+                   std::make_shared<StubFileSource>(ResourceOptions::Default(), ClientOptions()),
+                   MapOptions().withMapMode(MapMode::Continuous).withSize(frontend.getSize()));
+    map.getStyle().loadJSON(R"({"version": 8, "sources": {}, "layers": []})");
+    map.jumpTo(CameraOptions().withCenter(LatLng{0, 0}).withZoom(10).withPitch(60));
+    observer.log.clear();
+
+    int finished = 0;
+    AnimationOptions animation(Milliseconds(500));
+    animation.transitionFinishFn = [&] {
+        ++finished;
+    };
+    std::optional<CameraOptions> capped;
+    observer.isChanging = [&] {
+        if (capped) return;
+        map.setBounds(BoundOptions().withMaxPitch(30));
+        capped = map.getCameraOptions();
+    };
+    const TimePoint start = Clock::now();
+    map.easeTo(CameraOptions().withCenter(LatLng{0, 1}), animation);
+    while (Clock::now() - start < Milliseconds(750)) {
+        std::this_thread::sleep_for(Milliseconds(16));
+        map.triggerRepaint();
+    }
+
+    ASSERT_TRUE(capped);
+    const CameraOptions camera = map.getCameraOptions();
+    EXPECT_DOUBLE_EQ(capped->center->longitude(), camera.center->longitude());
+    EXPECT_LT(camera.center->longitude(), 0.5);
+    EXPECT_NEAR(30.0, *camera.pitch, 1e-9);
+    EXPECT_EQ(1, finished);
+    EXPECT_EQ("willA didA willI didI ", observer.log);
 }
 
 TEST(Map, MapOptions) {

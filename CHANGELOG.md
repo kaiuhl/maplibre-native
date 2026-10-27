@@ -35,6 +35,7 @@
 ### 🐞 Bug fixes
 
 - *...Add new stuff here...*
+- [core] Fix an animated camera move going to its destination in one frame, without finishing, when the camera is set from `onCameraIsChanging` while it runs, as `Map::setBounds` lowering the maximum pitch below the camera's does. The camera set now cancels the move where it is, as one set at any other time does.
 - [core] Answer cache-only requests for a remote PMTiles archive from the ambient cache instead of the network, so tiles panned past no longer hold the network request slots the visible tiles need.
 - [core] Cancel a PMTiles request's archive fetches when the request is cancelled, and free them once it's answered, instead of keeping them for the life of the file source.
 - [core] Fix PMTiles tiles intermittently failing to load with `Error parsing PMTiles directory: map::at: key not found` after several requests loaded the same directory at once.

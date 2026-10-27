@@ -4,6 +4,7 @@ MapLibre welcomes participation and contributions from everyone. Please read [`M
 
 ## main
 
+- Fix an animated camera move going to its destination in one frame when the camera is set from `-mapView:regionIsChangingWithReason:` or `-mapViewRegionIsChanging:` while it runs, as setting `maximumPitch` below the camera's pitch does. The camera set now cancels the move where it is, as one set at any other time does.
 - Answer cache-only requests for a remote PMTiles archive from the ambient cache instead of the network, so tiles panned past no longer hold the network request slots the visible tiles need.
 - Cancel a PMTiles request's archive fetches when the request is cancelled, and free them once it's answered, instead of keeping them for the life of the file source.
 - Fix PMTiles tiles intermittently failing to load with `Error parsing PMTiles directory: map::at: key not found` after several requests loaded the same directory at once.
