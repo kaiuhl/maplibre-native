@@ -18,7 +18,6 @@
 
 #include <cmath>
 #include <algorithm>
-#include <array>
 
 namespace mln {
 
@@ -34,30 +33,19 @@ const std::map<OverscaledTileID, std::unique_ptr<Tile>> emptyPrefetchedTiles;
 // whether or not it has loaded: one still loading isn't cached, nothing asked for it again, and the
 // centre clamp never had a height to put the camera back above the ground with.
 void coverCenter(std::vector<OverscaledTileID>& tiles, const TransformState& state, uint8_t z, uint8_t overscaledZ) {
-    const LatLng center = state.getLatLng(LatLng::Unwrapped);
-    // The centre's tile at `zoom`, x unwrapped: in tile units, a world 2^zoom across.
+    // The centre in tile units at zoom 0, x unwrapped; at `zoom`, 2^zoom times that.
+    const Point<double> center = Projection::project(state.getLatLng(LatLng::Unwrapped), 0);
     const auto tileAt = [&](uint8_t zoom) {
-        const Point<double> p = Projection::project(center, static_cast<int32_t>(zoom));
-        const auto across = static_cast<int64_t>(1) << zoom;
-        return std::array<int64_t, 2>{static_cast<int64_t>(std::floor(p.x)),
-                                      std::clamp<int64_t>(static_cast<int64_t>(std::floor(p.y)), 0, across - 1)};
+        const double across = std::exp2(zoom);
+        return UnwrappedTileID(zoom,
+                               static_cast<int64_t>(std::floor(center.x * across)),
+                               static_cast<int64_t>(std::floor(center.y * across)));
     };
-    const bool covered = std::ranges::any_of(tiles, [&](const OverscaledTileID& id) {
-        const auto [x, y] = tileAt(id.canonical.z);
-        const auto across = static_cast<int64_t>(1) << id.canonical.z;
-        return x == id.canonical.x + id.wrap * across && y == id.canonical.y;
-    });
-    if (covered) {
-        return;
+    const bool covered = std::ranges::any_of(
+        tiles, [&](const OverscaledTileID& id) { return id.toUnwrapped() == tileAt(id.canonical.z); });
+    if (!covered) {
+        tiles.push_back(tileAt(z).overscaleTo(overscaledZ));
     }
-    const auto [x, y] = tileAt(z);
-    const auto across = static_cast<int64_t>(1) << z;
-    const int64_t wrap = (x >= 0 ? x : x - across + 1) / across; // floor division
-    tiles.emplace_back(overscaledZ,
-                       static_cast<int16_t>(wrap),
-                       z,
-                       static_cast<uint32_t>(x - wrap * across),
-                       static_cast<uint32_t>(y));
 }
 } // namespace
 
