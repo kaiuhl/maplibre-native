@@ -133,8 +133,10 @@ public:
     /// Slides the centre along the line of sight to `altitudeMeters`, the zoom following, so the
     /// camera stays where it is. False, changing nothing, when there was nothing to move, the line
     /// of sight nearly grazes the plane at that altitude, the plane is (nearly) at the camera, or
-    /// the zoom limits, the bounds or the constrain mode would cut the move short.
-    bool setCenterAltitudeKeepingView(double altitudeMeters);
+    /// the zoom limits, the bounds or the constrain mode would cut the move short. With
+    /// `stopAtZoomLimits`, a move past the zoom limits goes as far as they allow instead, the centre
+    /// resting above or below that altitude by the rest.
+    bool setCenterAltitudeKeepingView(double altitudeMeters, bool stopAtZoomLimits = false);
     /// Whether the style had terrain when last checked, and whether the centre has yet to come
     /// back to sea level since it was removed (a transition was in flight, or a still map has
     /// not rendered since).
@@ -169,9 +171,6 @@ public:
     /// from the map-side heights: where setCenterAltitudeKeepingView puts the centre on the
     /// terrain. Nullopt without heights there, or with the camera inside the terrain.
     std::optional<double> groundOnLineOfSight() const;
-    /// Moves the centre along the line of sight onto `ground`, keeping the camera: as far as the
-    /// zoom limits allow, and not at all where setCenterAltitudeKeepingView refuses it otherwise.
-    void anchorCenterOnLineOfSight(double ground);
     /// Puts the centre on the ground once nothing is moving the camera: keeping a centre the camera
     /// was set to, and otherwise the camera. True when it moved anything.
     bool settleCenterOnGround();

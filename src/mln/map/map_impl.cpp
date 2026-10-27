@@ -369,9 +369,9 @@ void Map::Impl::anchorCenterOnTerrain() {
     }
 }
 
-bool Map::Impl::setCenterAltitudeKeepingView(double altitudeMeters) {
+bool Map::Impl::setCenterAltitudeKeepingView(double altitudeMeters, bool stopAtZoomLimits) {
     const TransformState& state = transform.getState();
-    const double rise = altitudeMeters - state.getCenterAltitude();
+    double rise = altitudeMeters - state.getCenterAltitude();
     if (std::abs(rise) < 1.0) {
         return false;
     }
@@ -390,11 +390,25 @@ bool Map::Impl::setCenterAltitudeKeepingView(double altitudeMeters) {
     // In pixels at the current zoom, the unit of the camera-to-centre distance along the line
     // of sight.
     const double metresPerPixel = Projection::getMetersPerPixelAtLatitude(camera.center->latitude(), *camera.zoom);
-    const double risePixels = rise / metresPerPixel;
+    double risePixels = rise / metresPerPixel;
     const double distance = state.getCameraToCenterDistance();
     // Up the line of sight by `rise` (down, for a negative one): rise/cos(pitch) closer to the
     // camera, rise·tan(pitch) nearer it on the ground.
-    const double remaining = distance - risePixels / std::cos(pitch);
+    double remaining = distance - risePixels / std::cos(pitch);
+    double zoom = *camera.zoom + std::log2(distance / remaining);
+    const double zoomLimit = rise > 0.0 ? state.getMaxZoom() : state.getMinZoom();
+    // NaN, where `remaining` is not ahead of the camera, is past the maximum zoom.
+    if (stopAtZoomLimits && (rise > 0.0 ? !(zoom <= zoomLimit) : zoom < zoomLimit)) {
+        // Only as far as the zoom limit lets the camera's distance to the centre go.
+        zoom = zoomLimit;
+        remaining = distance * std::exp2(*camera.zoom - zoomLimit);
+        risePixels = (distance - remaining) * std::cos(pitch);
+        rise = risePixels * metresPerPixel;
+        if (std::abs(rise) < 1.0) {
+            return false;
+        }
+        altitudeMeters = state.getCenterAltitude() + rise;
+    }
     if (remaining < distance * 0.05) {
         return false; // the ground is (nearly) at the camera: leave it
     }
@@ -404,7 +418,6 @@ bool Map::Impl::setCenterAltitudeKeepingView(double altitudeMeters) {
     const Point<double> center = Projection::project(*camera.center, scale);
     const LatLng anchored = Projection::unproject(
         {center.x - shift * std::sin(bearing), center.y + shift * std::cos(bearing)}, scale);
-    const double zoom = *camera.zoom + std::log2(distance / remaining);
     const auto keepingView = CameraOptions().withCenter(anchored).withZoom(zoom).withCenterAltitude(altitudeMeters);
 
     // The zoom limits, the bounds and the constrain mode cut off whatever part of a move they
@@ -486,16 +499,13 @@ bool Map::Impl::settleCenterOnGround() {
     if (cameraSetToCenter) {
         return clampCenterToTerrain(groundUnderCenter());
     }
-    // A move relative to the view (a fling, a drag, a pinch, an animation cut short) has no centre
-    // to keep, and the same clamp would lift or drop the camera by however much the ground under
-    // the centre changed since the move began, or since a finer DEM tile landed: the whole view
-    // jumped as it came to rest. The camera stays where it is, and the centre moves along the line
-    // of sight onto the ground it meets, the zoom following, as gl-js's recalculateZoomAndCenter
-    // does at the end of a terrain gesture.
-    const double before = transform.getState().getCenterAltitude();
+    // After a move relative to the view (a fling, a drag, a pinch, an animation cut short) the
+    // camera stays, and the centre moves along the line of sight onto the ground it meets, the zoom
+    // following, as gl-js's recalculateZoomAndCenter does at the end of a terrain gesture.
     if (const auto ground = groundOnLineOfSight()) {
-        anchorCenterOnLineOfSight(*ground);
-        return transform.getState().getCenterAltitude() != before;
+        // As far along it as the zoom limits allow: a fling that ends uphill at the maximum zoom would
+        // have to zoom past it, and the centre rests above the ground by the rest.
+        return setCenterAltitudeKeepingView(*ground, true);
     }
     // No ground on the line of sight in the map-side heights: they haven't loaded there yet, or the
     // camera is inside the terrain. The clamp lifts a camera that is below the ground under the
@@ -524,27 +534,6 @@ std::optional<double> Map::Impl::groundOnLineOfSight() const {
         return std::nullopt;
     }
     return groundAt(*surface);
-}
-
-void Map::Impl::anchorCenterOnLineOfSight(double ground) {
-    if (setCenterAltitudeKeepingView(ground)) {
-        return;
-    }
-    // Refused: under a metre (the centre is on that ground), or the zoom the camera's distance to
-    // the ground comes to is past the zoom limits (a fling ending uphill at the app's maximum zoom
-    // would have to zoom past it). The camera stays all the same, and the centre goes as far along
-    // the line of sight as the limit allows, resting above or below the ground by the rest.
-    const TransformState& state = transform.getState();
-    const double rise = ground - state.getCenterAltitude();
-    const double zoom = state.getZoom();
-    const double limit = rise > 0.0 ? state.getMaxZoom() : state.getMinZoom();
-    // setCenterAltitudeKeepingView's zoom, zoom + log2(d / (d - rise / cos(pitch))) in pixels at
-    // this zoom, at the limit; a hair short of it, so that rounding doesn't take the move past it.
-    const double metresPerPixel = Projection::getMetersPerPixelAtLatitude(state.getLatLng().latitude(), zoom);
-    const double limitRise = state.getCameraToCenterDistance() * std::cos(state.getPitch()) *
-                             (1.0 - std::exp2(zoom - limit)) * metresPerPixel * (1.0 - 1e-6);
-    const double reachable = rise > 0.0 ? std::min(rise, limitRise) : std::max(rise, limitRise);
-    setCenterAltitudeKeepingView(state.getCenterAltitude() + reachable);
 }
 
 double Map::Impl::groundUnderCenter() const {
