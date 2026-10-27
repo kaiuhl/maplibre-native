@@ -965,6 +965,24 @@ TEST(TerrainCamera, ClampDoesNotApplyAfterTerrainRemoval) {
     EXPECT_NEAR(test.altitude(), 0.0, 0.001);
 }
 
+// A style reload removes the terrain and adds it back over the same ground. Removal returns the
+// centre to sea level; the height under the centre the terrain then reports is the one it reported
+// before removal, and the clamp has to act on it all the same, or the centre stays at sea level
+// with the view dropped until the ground under it changes (Timberline, 370 pt).
+TEST(TerrainCamera, ClampPutsTheCentreBackOnTerrainThatReturns) {
+    TerrainTransitionTest test;
+    ASSERT_TRUE(test.settleOnPlateau());
+
+    test.map.getStyle().setTerrain(nullptr);
+    for (int i = 0; i < 10; ++i) {
+        test.renderFrame();
+    }
+    ASSERT_NEAR(test.altitude(), 0.0, 0.001);
+
+    test.map.getStyle().setTerrain(std::make_unique<style::Terrain>("dem", 1.0f));
+    EXPECT_TRUE(test.settleOnPlateau()) << "centre altitude " << test.altitude();
+}
+
 // The terrain height under a position reads the loaded DEM, as drawn: nothing before a tile
 // covers it, the plateau once one does, scaled by the exaggeration, and nothing without terrain.
 TEST(TerrainElevation, QueryReadsTheTerrainAsDrawn) {
