@@ -770,11 +770,11 @@ double RenderTerrain::getElevationForLatLng(const LatLng& latLng) const {
         }
     }
 
-    // No drawn DEM tile covers the position, but the source may still hold one: the cover
-    // leaves out ground that rises above the camera, so a camera put below the terrain (a
-    // centre at sea level over high ground at a high zoom, when the terrain is turned on or
-    // its DEM arrives) would never be shown the ground it is in. The held tile's height is
-    // what lets the clamp raise the camera out of it (Map::setCenterClampedToGround).
+    // No drawn DEM tile covers the position, but the source may still hold one, in use or cached:
+    // the cover leaves out ground that rises above the camera, all of it around a camera put below
+    // the terrain. It always includes the tile under the centre, in view or not
+    // (TileParameters::coverCenter), whose height lets the clamp raise such a camera out of the
+    // ground (Map::setCenterClampedToGround).
     if (demSource->baseImpl->type != style::SourceType::RasterDEM) {
         return 0.0;
     }
