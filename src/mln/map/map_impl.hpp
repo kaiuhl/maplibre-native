@@ -144,9 +144,13 @@ public:
     /// Brings the centre down to sea level keeping the view or, where the limits refuse that,
     /// keeping the centre and zoom.
     void returnCenterToSeaLevel();
-    /// Runs a return still waiting before the app sets a camera, which every camera entry point
-    /// does first, so that the return does not move the app's camera afterwards.
+    /// Runs a return still waiting before the app sets a camera, so that the return does not move
+    /// the app's camera afterwards.
     void settleCenterAwaitingSeaLevel();
+    /// What every camera entry point does before it sets the camera: marks the camera as the app's
+    /// (the style's default no longer applies), runs a return to sea level still waiting, and
+    /// records whether the camera is being set to a centre (cameraSetToCenter).
+    void beginCameraChange(bool toCenter);
     /// A height report arrived while a camera transition was running; the clamp applies it
     /// once the transition ends instead of cutting the transition short.
     bool centerAwaitingTerrainAnchor = false;
@@ -155,10 +159,12 @@ public:
     /// an anchor: a gesture's deceleration), cancelled, or set as a camera (setFreeCameraOptions,
     /// setCenterAltitudeKeepingView, a jump with no centre). Once a transition ends, the clamp keeps
     /// a centre it was given and otherwise keeps the camera (onUpdate).
-    bool transitionNamedCenter = false;
+    bool cameraSetToCenter = false;
     /// The ground under the centre as it is now: the map-side heights where they have it, else the
     /// height the renderer last reported.
     double groundUnderCenter() const;
+    /// The map-side height of the ground at `latLng`; nullopt where they have none.
+    std::optional<double> groundAt(LatLng latLng) const;
     /// Height of the ground the line of sight from the camera through the centre meets first,
     /// from the map-side heights: where setCenterAltitudeKeepingView puts the centre on the
     /// terrain. Nullopt without heights there, or with the camera inside the terrain.

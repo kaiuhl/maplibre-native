@@ -85,10 +85,8 @@ void Map::renderStill(StillImageCallback callback) {
 }
 
 void Map::renderStill(const CameraOptions& camera, MapDebugOptions debugOptions, StillImageCallback callback) {
-    impl->cameraMutated = true;
     impl->debugOptions = debugOptions;
-    impl->settleCenterAwaitingSeaLevel();
-    impl->transitionNamedCenter = camera.center.has_value();
+    impl->beginCameraChange(camera.center.has_value());
     impl->transform.jumpTo(camera);
     renderStill(std::move(callback));
 }
@@ -120,7 +118,7 @@ void Map::setStyle(std::unique_ptr<Style> style) {
 
 void Map::cancelTransitions() {
     // Stopped short of any centre it was given: the clamp keeps the camera where it stopped.
-    impl->transitionNamedCenter = false;
+    impl->cameraSetToCenter = false;
     impl->transform.cancelTransitions();
     impl->onUpdate();
 }
@@ -157,25 +155,19 @@ void Map::jumpTo(const CameraOptions& camera) {
 }
 
 void Map::easeTo(const CameraOptions& camera, const AnimationOptions& animation) {
-    impl->cameraMutated = true;
-    impl->settleCenterAwaitingSeaLevel();
-    impl->transitionNamedCenter = camera.center.has_value();
+    impl->beginCameraChange(camera.center.has_value());
     impl->transform.easeTo(camera, animation);
     impl->onUpdate();
 }
 
 void Map::flyTo(const CameraOptions& camera, const AnimationOptions& animation) {
-    impl->cameraMutated = true;
-    impl->settleCenterAwaitingSeaLevel();
-    impl->transitionNamedCenter = camera.center.has_value();
+    impl->beginCameraChange(camera.center.has_value());
     impl->transform.flyTo(camera, animation);
     impl->onUpdate();
 }
 
 void Map::moveBy(const ScreenCoordinate& point, const AnimationOptions& animation) {
-    impl->cameraMutated = true;
-    impl->settleCenterAwaitingSeaLevel();
-    impl->transitionNamedCenter = false;
+    impl->beginCameraChange(false);
     impl->transform.moveBy(point, animation);
     impl->onUpdate();
 }
@@ -190,9 +182,7 @@ void Map::scaleBy(double scale, const std::optional<ScreenCoordinate>& anchor, c
 }
 
 void Map::rotateBy(const ScreenCoordinate& first, const ScreenCoordinate& second, const AnimationOptions& animation) {
-    impl->cameraMutated = true;
-    impl->settleCenterAwaitingSeaLevel();
-    impl->transitionNamedCenter = false;
+    impl->beginCameraChange(false);
     impl->transform.rotateBy(first, second, animation);
     impl->onUpdate();
 }
@@ -490,12 +480,11 @@ std::optional<double> Map::getTerrainElevation(const LatLng& latLng) const {
 }
 
 ScreenCoordinate Map::pixelForLatLngOnTerrain(const LatLng& latLng) const {
-    // Look the height up at the longitude pixelForLatLng projects, unwrapped for the shortest path
-    // to the centre: near the antimeridian the drawn DEM tiles have wrap != 0, and the index keys
-    // them by unwrapped x
-    LatLng unwrapped = latLng.wrapped();
-    unwrapped.unwrapForShortestPath(impl->transform.getLatLng());
-    if (const auto elevation = getTerrainElevation(unwrapped)) {
+    // Projected at the longitude Impl::groundAt looks the height up at: unwrapped for the shortest
+    // path to the centre, as the DEM tiles near the antimeridian are drawn.
+    if (const auto elevation = impl->groundAt(latLng)) {
+        LatLng unwrapped = latLng.wrapped();
+        unwrapped.unwrapForShortestPath(impl->transform.getLatLng());
         return pixelForLatLng(unwrapped, *elevation);
     }
     return pixelForLatLng(latLng);
@@ -628,11 +617,9 @@ void Map::dumpDebugLogs() const {
 }
 
 void Map::setFreeCameraOptions(const FreeCameraOptions& camera) {
-    impl->settleCenterAwaitingSeaLevel();
     // A camera put where it is, not a centre: the clamp keeps it (onUpdate).
-    impl->transitionNamedCenter = false;
+    impl->beginCameraChange(false);
     impl->transform.setFreeCameraOptions(camera);
-    impl->cameraMutated = true;
     impl->onUpdate();
 }
 
@@ -704,11 +691,12 @@ bool Map::setCenterAltitudeKeepingView(double altitudeMeters) {
     // Like every camera entry point, run a return to sea level that is still waiting first:
     // run later, it would move the camera this sets.
     impl->settleCenterAwaitingSeaLevel();
-    // Keeps the view, so a transition this cuts short leaves no centre for the clamp to keep.
-    impl->transitionNamedCenter = false;
     const bool moved = impl->setCenterAltitudeKeepingView(altitudeMeters);
     if (moved) {
         impl->cameraMutated = true;
+        // Keeps the view, so a transition this cut short leaves no centre for the clamp to keep. A
+        // move refused changes nothing, that transition's centre included.
+        impl->cameraSetToCenter = false;
     }
     impl->onUpdate();
     return moved;
