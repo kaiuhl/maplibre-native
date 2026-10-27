@@ -6,6 +6,7 @@
 #include <mln/map/bound_options.hpp>
 #include <mln/map/camera.hpp>
 #include <mln/map/map_options.hpp>
+#include <mln/map/transform.hpp>
 #include <mln/math/angles.hpp>
 #include <mln/style/style.hpp>
 #include <mln/style/terrain.hpp>
@@ -813,6 +814,29 @@ TEST(TerrainCamera, GroundArrivingAtTheEndOfAMoveIsEasedOnto) {
     EXPECT_GE(rise.milliseconds(), 300.0);
     test.expectEyeAtEnd();
     EXPECT_NEAR(test.altitude(), westPlateauMeters, 5.0);
+}
+
+// A transition's frames are drawn at the times the map gives them, all at once in a still render.
+// Whether new ground came too late for what is left of the move to carry the centre onto it, and
+// the 0.4 s the centre takes onto it then, go by those times rather than by the wall clock.
+TEST(TerrainCamera, LateGroundEasesOnTheFramesClock) {
+    Transform transform;
+    transform.resize({512, 512});
+    transform.jumpTo(CameraOptions().withCenter(LatLng(0.0, 0.0)).withZoom(10.0).withCenterAltitude(0.0));
+    transform.easeTo(CameraOptions().withCenter(LatLng(0.0, 0.01)).withCenterAltitude(0.0),
+                     AnimationOptions(Seconds(1)));
+    const TimePoint start = transform.getTransitionStart();
+    transform.updateTransitions(start + Milliseconds(900));
+    transform.retargetTransitionCenterAltitude(1000.0);
+
+    // At the move's end, a quarter of the way through the 0.4 s ease...
+    transform.updateTransitions(start + Milliseconds(1000));
+    EXPECT_TRUE(transform.inTransition());
+    EXPECT_LT(transform.getState().getCenterAltitude(), 500.0);
+    // ...and on the ground 0.4 s after it came.
+    transform.updateTransitions(start + Milliseconds(1300));
+    EXPECT_FALSE(transform.inTransition());
+    EXPECT_DOUBLE_EQ(transform.getState().getCenterAltitude(), 1000.0);
 }
 
 // The same for a free camera set while a transition runs: it stays where it was put.

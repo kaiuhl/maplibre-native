@@ -175,7 +175,7 @@ private:
 
     TimePoint transitionStart;
     Duration transitionDuration;
-    /// The time the running transition's frame is drawing.
+    /// The time the running transition's frame is drawing, or last drew: its start until the first.
     TimePoint transitionFrameTime;
     /// The centre altitude the running transition eases to, how far along it is (the fraction its
     /// frame was last given), and the centre it was given. A new target carries on from the

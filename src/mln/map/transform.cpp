@@ -623,6 +623,7 @@ void Transform::startTransition(const CameraOptions& camera,
     }
 
     transitionStart = Clock::now();
+    transitionFrameTime = transitionStart;
     transitionDuration = duration;
 
     transitionFrameFn = [isAnimated, animation, frame, anchor, anchorLatLng, this](const TimePoint now) {
@@ -746,8 +747,9 @@ void Transform::retargetTransitionCenterAltitude(double altitudeMeters) {
     // 0.2 s of a flight moved the view by hundreds of points on one frame. The rest of the way goes
     // on the clock instead, from the altitude the last frame drew, over centerAltitudeEaseDuration,
     // and the transition lingers past its end until it has arrived. So does a target that changes
-    // again on the way.
-    const TimePoint now = Clock::now();
+    // again on the way. On the frames' clock, which the map gives them (a still render draws them
+    // all at once), from the time the last one drew.
+    const TimePoint now = transitionFrameTime;
     if (ease.clockStart || transitionStart + transitionDuration - now < centerAltitudeEaseDuration) {
         ease.from = state.getCenterAltitude();
         ease.target = altitudeMeters;
