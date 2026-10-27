@@ -370,6 +370,8 @@ void Map::Impl::anchorCenterOnTerrain() {
     // height reported under the centre: the centre moves off that spot onto the line of sight, and
     // the clamp would then move the camera by the difference.
     if (setCenterAltitudeKeepingView(groundOnLineOfSight().value_or(terrainCenterElevation))) {
+        // Keeps the view, so a transition this cut short leaves no centre for the clamp to keep.
+        cameraSetToCenter = false;
         onUpdate();
     }
 }

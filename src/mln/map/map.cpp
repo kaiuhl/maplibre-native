@@ -691,11 +691,12 @@ bool Map::setCenterAltitudeKeepingView(double altitudeMeters) {
     // Like every camera entry point, run a return to sea level that is still waiting first:
     // run later, it would move the camera this sets.
     impl->settleCenterAwaitingSeaLevel();
-    // Keeps the view, so a transition this cuts short leaves no centre for the clamp to keep.
-    impl->cameraSetToCenter = false;
     const bool moved = impl->setCenterAltitudeKeepingView(altitudeMeters);
     if (moved) {
         impl->cameraMutated = true;
+        // Keeps the view, so a transition this cut short leaves no centre for the clamp to keep. A
+        // move refused changes nothing, that transition's centre included.
+        impl->cameraSetToCenter = false;
     }
     impl->onUpdate();
     return moved;
