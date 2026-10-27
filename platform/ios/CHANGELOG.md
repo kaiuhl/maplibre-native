@@ -4,6 +4,7 @@ MapLibre welcomes participation and contributions from everyone. Please read [`M
 
 ## main
 
+- Answer cache-only requests for a remote PMTiles archive from the ambient cache instead of the network, so tiles panned past no longer hold the network request slots the visible tiles need.
 - Cancel a PMTiles request's archive fetches when the request is cancelled, and free them once it's answered, instead of keeping them for the life of the file source.
 - Fix PMTiles tiles intermittently failing to load with `Error parsing PMTiles directory: map::at: key not found` after several requests loaded the same directory at once.
 - With 3D terrain, pinch, rotate and two-finger tilt gestures turn around the ground under the middle of the screen instead of a sea-level point beneath it, and a pan over high ground no longer jumps the map along the view. Removing the terrain brings the centre back to sea level without moving the camera. After a gesture with terrain, camera changes the app makes keep the centre altitude the gesture set; set the altitude explicitly to place the centre elsewhere ([#4711](https://github.com/maplibre/maplibre-native/pull/4711)).

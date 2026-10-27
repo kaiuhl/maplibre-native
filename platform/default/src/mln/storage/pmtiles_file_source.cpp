@@ -47,6 +47,16 @@ bool acceptsURL(const std::string& url) {
 std::string extract_url(const std::string& url) {
     return url.substr(std::char_traits<char>::length(mln::util::PMTILES_PROTOCOL));
 }
+
+// How to load the parts of the archive that answer a request. A cache-only request reads only what
+// is available without the network: the ambient cache for a remote archive, and the file itself for
+// a local one, which the local file source reads whatever the loading method.
+mln::Resource::LoadingMethod archiveLoadingMethod(const mln::Resource& resource) {
+    if (resource.loadingMethod == mln::Resource::LoadingMethod::CacheOnly) {
+        return mln::Resource::LoadingMethod::CacheOnly;
+    }
+    return mln::Resource::LoadingMethod::All;
+}
 } // namespace
 
 // temporary, remove this when it's available in `pmtiles.hpp`
@@ -72,7 +82,7 @@ public:
     void request_tilejson(AsyncRequest* req, const Resource& resource, const ActorRef<FileSourceRequest>& ref) {
         auto url = extract_url(resource.url);
 
-        getMetadata(url, req, [=, this](std::unique_ptr<Response::Error> error) {
+        getMetadata(url, req, archiveLoadingMethod(resource), [=, this](std::unique_ptr<Response::Error> error) {
             Response response;
 
             if (error) {
@@ -89,8 +99,9 @@ public:
     // Load data for specific tile
     void request_tile(AsyncRequest* req, const Resource& resource, ActorRef<FileSourceRequest> ref) {
         auto url = extract_url(resource.url);
+        const auto loadingMethod = archiveLoadingMethod(resource);
 
-        getHeader(url, req, [=, this](std::unique_ptr<Response::Error> error) {
+        getHeader(url, req, loadingMethod, [=, this](std::unique_ptr<Response::Error> error) {
             if (error) {
                 Response response;
                 response.noContent = true;
@@ -126,6 +137,7 @@ public:
             getTileAddress(
                 url,
                 req,
+                loadingMethod,
                 tileID,
                 header.root_dir_offset,
                 static_cast<std::uint32_t>(header.root_dir_bytes),
@@ -147,7 +159,7 @@ public:
                     }
 
                     Resource tileResource(Resource::Kind::Source, url);
-                    tileResource.loadingMethod = Resource::LoadingMethod::All;
+                    tileResource.loadingMethod = loadingMethod;
                     tileResource.dataRange = std::make_pair(tileAddress.first,
                                                             tileAddress.first + tileAddress.second - 1);
 
@@ -248,14 +260,17 @@ private:
         return fileSource;
     }
 
-    void getHeader(const std::string& url, AsyncRequest* req, AsyncCallback callback) {
+    void getHeader(const std::string& url,
+                   AsyncRequest* req,
+                   Resource::LoadingMethod loadingMethod,
+                   AsyncCallback callback) {
         if (header_cache.contains(url)) {
             callback(std::unique_ptr<Response::Error>());
             return;
         }
 
         Resource resource(Resource::Kind::Source, url);
-        resource.loadingMethod = Resource::LoadingMethod::All;
+        resource.loadingMethod = loadingMethod;
 
         resource.dataRange = std::make_pair<uint64_t, uint64_t>(pmtilesHeaderOffset,
                                                                 pmtilesHeaderOffset + pmtilesHeaderLength - 1);
@@ -310,7 +325,10 @@ private:
             });
     }
 
-    void getMetadata(std::string& url, AsyncRequest* req, AsyncCallback callback) {
+    void getMetadata(std::string& url,
+                     AsyncRequest* req,
+                     Resource::LoadingMethod loadingMethod,
+                     AsyncCallback callback) {
         if (metadata_cache.contains(url)) {
             callback(std::unique_ptr<Response::Error>());
             return;
@@ -319,6 +337,7 @@ private:
         getHeader(
             url,
             req,
+            loadingMethod,
             [=, this](std::unique_ptr<Response::Error> error) { // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
                 if (error) {
                     callback(std::move(error));
@@ -428,7 +447,7 @@ private:
 
                 if (header.json_metadata_bytes > 0) {
                     Resource resource(Resource::Kind::Source, url);
-                    resource.loadingMethod = Resource::LoadingMethod::All;
+                    resource.loadingMethod = loadingMethod;
                     resource.dataRange = std::make_pair(header.json_metadata_offset,
                                                         header.json_metadata_offset + header.json_metadata_bytes - 1);
 
@@ -517,6 +536,7 @@ private:
     // it may have been evicted.
     void getDirectory(const std::string& url,
                       AsyncRequest* req,
+                      Resource::LoadingMethod loadingMethod,
                       uint64_t directoryOffset,
                       uint32_t directoryLength,
                       AsyncDirectoryCallback callback) {
@@ -529,7 +549,7 @@ private:
             return;
         }
 
-        getHeader(url, req, [=, this](std::unique_ptr<Response::Error> error) {
+        getHeader(url, req, loadingMethod, [=, this](std::unique_ptr<Response::Error> error) {
             if (error) {
                 callback(nullptr, std::move(error));
                 return;
@@ -538,7 +558,7 @@ private:
             pmtiles::headerv3 header = header_cache.at(url);
 
             Resource resource(Resource::Kind::Source, url);
-            resource.loadingMethod = Resource::LoadingMethod::All;
+            resource.loadingMethod = loadingMethod;
             resource.dataRange = std::make_pair(directoryOffset, directoryOffset + directoryLength - 1);
 
             tasks[req] = getFileSource()->request(resource, [=, this](const Response& response) {
@@ -589,6 +609,7 @@ private:
 
     void getTileAddress(const std::string& url,
                         AsyncRequest* req,
+                        Resource::LoadingMethod loadingMethod,
                         uint64_t tileID,
                         uint64_t directoryOffset,
                         uint32_t directoryLength,
@@ -606,6 +627,7 @@ private:
         getDirectory(
             url,
             req,
+            loadingMethod,
             directoryOffset,
             directoryLength,
             [=, this](const DirectoryEntries& directory,
@@ -626,6 +648,7 @@ private:
 
                     getTileAddress(url,
                                    req,
+                                   loadingMethod,
                                    tileID,
                                    header.leaf_dirs_offset + entry.offset,
                                    entry.length,

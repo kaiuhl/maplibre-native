@@ -66,14 +66,17 @@ std::string makeLeafPerTileArchive(uint64_t tileCount) {
     return header.serialize() + rootDirectory + leafDirectories + tileData;
 }
 
-Resource tileResource(uint64_t id) {
+Resource tileResource(uint64_t id,
+                      const std::string &url = archiveURL,
+                      Resource::LoadingMethod loadingMethod = Resource::LoadingMethod::All) {
     const auto tile = pmtiles::tileid_to_zxy(id);
-    return Resource::tile(archiveURL,
+    return Resource::tile(url,
                           1.0,
                           static_cast<int32_t>(tile.x),
                           static_cast<int32_t>(tile.y),
                           static_cast<int8_t>(tile.z),
-                          Tileset::Scheme::XYZ);
+                          Tileset::Scheme::XYZ,
+                          loadingMethod);
 }
 
 // Serves the byte ranges PMTilesFileSource fetches from an archive in memory. While holding, it
@@ -174,35 +177,38 @@ private:
     std::shared_ptr<Archive> archive;
 };
 
-// While alive, PMTilesFileSource fetches through an ArchiveFileSource instead of the resource loader.
-class ScopedArchiveLoader {
+// While alive, the file source manager makes an ArchiveFileSource for the given type: for the
+// resource loader, PMTilesFileSource fetches from it directly; for the network, it stands in for
+// the online file source behind the resource loader and the ambient cache.
+class ScopedArchiveFileSource {
 public:
-    explicit ScopedArchiveLoader(std::shared_ptr<Archive> archive)
-        : previous(FileSourceManager::get()->unRegisterFileSourceFactory(FileSourceType::ResourceLoader)) {
+    ScopedArchiveFileSource(FileSourceType type_, std::shared_ptr<Archive> archive)
+        : type(type_),
+          previous(FileSourceManager::get()->unRegisterFileSourceFactory(type)) {
         FileSourceManager::get()->registerFileSourceFactory(
-            FileSourceType::ResourceLoader,
-            [archive](const ResourceOptions &, const ClientOptions &) -> std::unique_ptr<FileSource> {
+            type, [archive](const ResourceOptions &, const ClientOptions &) -> std::unique_ptr<FileSource> {
                 return std::make_unique<ArchiveFileSource>(archive);
             });
     }
 
-    ~ScopedArchiveLoader() {
+    ~ScopedArchiveFileSource() {
         if (previous) {
-            FileSourceManager::get()->registerFileSourceFactory(FileSourceType::ResourceLoader, std::move(previous));
+            FileSourceManager::get()->registerFileSourceFactory(type, std::move(previous));
         } else {
-            FileSourceManager::get()->unRegisterFileSourceFactory(FileSourceType::ResourceLoader);
+            FileSourceManager::get()->unRegisterFileSourceFactory(type);
         }
     }
 
-    ScopedArchiveLoader(const ScopedArchiveLoader &) = delete;
-    ScopedArchiveLoader &operator=(const ScopedArchiveLoader &) = delete;
+    ScopedArchiveFileSource(const ScopedArchiveFileSource &) = delete;
+    ScopedArchiveFileSource &operator=(const ScopedArchiveFileSource &) = delete;
 
 private:
+    const FileSourceType type;
     FileSourceManager::FileSourceFactory previous;
 };
 
-// Options of its own, so the file source manager makes a new resource loader from the archive
-// factory instead of returning one another test left alive.
+// Options of their own, so the file source manager makes new file sources from the factories
+// instead of returning ones another test left alive.
 ResourceOptions archiveResourceOptions() {
     ResourceOptions options;
     options.withApiKey("PMTilesFileSourceArchiveTest");
@@ -442,7 +448,7 @@ TEST(PMTilesFileSource, ConcurrentDirectoryLoads) {
     util::RunLoop loop;
 
     auto archive = std::make_shared<Archive>(makeLeafPerTileArchive(1));
-    ScopedArchiveLoader loader(archive);
+    ScopedArchiveFileSource loader(FileSourceType::ResourceLoader, archive);
     PMTilesFileSource pmtiles(archiveResourceOptions(), ClientOptions());
 
     // Read the header, so the tile requests start at the root directory.
@@ -467,7 +473,7 @@ TEST(PMTilesFileSource, DirectoryCacheEviction) {
 
     constexpr uint64_t tileCount = 250;
     auto archive = std::make_shared<Archive>(makeLeafPerTileArchive(tileCount));
-    ScopedArchiveLoader loader(archive);
+    ScopedArchiveFileSource loader(FileSourceType::ResourceLoader, archive);
     PMTilesFileSource pmtiles(archiveResourceOptions(), ClientOptions());
 
     // Read the header and the root directory.
@@ -506,7 +512,7 @@ TEST(PMTilesFileSource, CancelledRequestStopsLookup) {
     util::RunLoop loop;
 
     auto archive = std::make_shared<Archive>(makeLeafPerTileArchive(1));
-    ScopedArchiveLoader loader(archive);
+    ScopedArchiveFileSource loader(FileSourceType::ResourceLoader, archive);
     PMTilesFileSource pmtiles(archiveResourceOptions(), ClientOptions());
 
     // Read the header, so the tile request's first fetch is the root directory.
@@ -533,10 +539,66 @@ TEST(PMTilesFileSource, FinishedRequestFreesFetches) {
     util::RunLoop loop;
 
     auto archive = std::make_shared<Archive>(makeLeafPerTileArchive(1));
-    ScopedArchiveLoader loader(archive);
+    ScopedArchiveFileSource loader(FileSourceType::ResourceLoader, archive);
     PMTilesFileSource pmtiles(archiveResourceOptions(), ClientOptions());
 
     ASSERT_FALSE(requestOnce(loop, pmtiles, {Resource::Source, archiveURL}).error);
     expectTile(0, requestOnce(loop, pmtiles, tileResource(0)));
     EXPECT_TRUE(archive->waitForOpenFetches(0));
+}
+
+// For a remote archive, the cache is the ambient cache: a cache-only request reads the header,
+// directories and tile from it and never from the network, and answers NotFound for what isn't
+// there, so that the tile loader goes on to request the tile from the network.
+TEST(PMTilesFileSource, CacheOnlyRemoteArchive) {
+    util::RunLoop loop;
+
+    auto network = std::make_shared<Archive>(makeLeafPerTileArchive(2));
+    ScopedArchiveFileSource online(FileSourceType::Network, network);
+    PMTilesFileSource pmtiles(archiveResourceOptions(), ClientOptions());
+
+    const std::string url = "pmtiles://https://example.com/archive.pmtiles";
+    constexpr auto cacheOnly = Resource::LoadingMethod::CacheOnly;
+
+    Response response = requestOnce(loop, pmtiles, tileResource(0, url, cacheOnly));
+    ASSERT_TRUE(response.error);
+    EXPECT_EQ(Response::Error::Reason::NotFound, response.error->reason) << response.error->message;
+    EXPECT_EQ(0u, network->fetchCount());
+
+    // Loading the tile from the network stores what it fetched in the ambient cache...
+    expectTile(0, requestOnce(loop, pmtiles, tileResource(0, url)));
+    const std::size_t fetches = network->fetchCount();
+    EXPECT_LT(0u, fetches);
+
+    // ...where a cache-only request finds it.
+    expectTile(0, requestOnce(loop, pmtiles, tileResource(0, url, cacheOnly)));
+
+    // The other tile's leaf directory is in neither cache.
+    response = requestOnce(loop, pmtiles, tileResource(1, url, cacheOnly));
+    ASSERT_TRUE(response.error);
+    EXPECT_EQ(Response::Error::Reason::NotFound, response.error->reason) << response.error->message;
+    EXPECT_EQ(fetches, network->fetchCount());
+}
+
+// For a local archive, the file is the cache: a cache-only request reads the tile from it.
+TEST(PMTilesFileSource, CacheOnlyLocalArchive) {
+    util::RunLoop loop;
+
+    auto network = std::make_shared<Archive>(makeLeafPerTileArchive(1));
+    ScopedArchiveFileSource online(FileSourceType::Network, network);
+    PMTilesFileSource pmtiles(archiveResourceOptions(), ClientOptions());
+
+    const Response response = requestOnce(loop,
+                                          pmtiles,
+                                          Resource::tile(toAbsoluteURL("geography-class-png.pmtiles"),
+                                                         1.0,
+                                                         0,
+                                                         0,
+                                                         0,
+                                                         Tileset::Scheme::XYZ,
+                                                         Resource::LoadingMethod::CacheOnly));
+    ASSERT_FALSE(response.error) << response.error->message;
+    ASSERT_TRUE(response.data);
+    EXPECT_FALSE(response.noContent);
+    EXPECT_EQ(0u, network->fetchCount());
 }
