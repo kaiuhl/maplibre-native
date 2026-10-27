@@ -780,6 +780,29 @@ TEST(TerrainCamera, FreeCameraSetDuringATransitionIsKept) {
     }
 }
 
+// A setCenterAltitudeKeepingView that is refused moves nothing, and leaves the transition it would
+// have cut short running: the clamp still keeps the centre that transition was given.
+TEST(TerrainCamera, RefusedAltitudeChangeDuringATransitionKeepsItsCentre) {
+    TerrainTransitionTest test;
+    ASSERT_TRUE(test.settleOnPlateau());
+
+    bool refused = false;
+    ASSERT_TRUE(test.easeWest([&](bool finished) {
+        // Well over the 2000 m plateau, so the clamp has a new height waiting.
+        if (!finished && !refused && test.map.getCameraOptions({}).center->longitude() < -5.0) {
+            // Already at that altitude: nothing to move.
+            EXPECT_FALSE(test.map.setCenterAltitudeKeepingView(test.altitude()));
+            refused = true;
+        }
+    }));
+    ASSERT_TRUE(refused);
+
+    const auto camera = test.map.getCameraOptions({});
+    EXPECT_NEAR(camera.center->latitude(), test.westTarget.latitude(), 1e-6);
+    EXPECT_NEAR(camera.center->longitude(), test.westTarget.longitude(), 1e-6);
+    EXPECT_NEAR(*camera.centerAltitude, westPlateauMeters, 5.0);
+}
+
 // A jump to a centre while a transition runs arrives over other ground than the height the clamp
 // was holding for the transition: the clamp puts that centre on the ground under it, not at the
 // held height.

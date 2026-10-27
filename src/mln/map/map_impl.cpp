@@ -148,7 +148,7 @@ void Map::Impl::onUpdate() {
     if (centerAwaitingTerrainAnchor && !transform.inTransition()) {
         centerAwaitingTerrainAnchor = false;
         if (centerClampedToGround && style->impl->getTerrain() && !std::isnan(terrainCenterElevation) &&
-            (transitionNamedCenter || !anchorCenterOnLineOfSight())) {
+            (cameraSetToCenter || !anchorCenterOnLineOfSight())) {
             clampCenterToTerrain(groundUnderCenter());
         }
     }
@@ -372,6 +372,8 @@ void Map::Impl::anchorCenterOnTerrain() {
     // height reported under the centre: the centre moves off that spot onto the line of sight, and
     // the clamp would then move the camera by the difference.
     if (setCenterAltitudeKeepingView(groundOnLineOfSight().value_or(terrainCenterElevation))) {
+        // Keeps the view, so a transition this cut short leaves no centre for the clamp to keep.
+        cameraSetToCenter = false;
         onUpdate();
     }
 }
@@ -487,7 +489,7 @@ void Map::Impl::easeTransitionOntoGround() {
     // the ground there as the heights for it arrive, as gl-js's Camera._updateElevation does, so
     // that the clamp has nothing left to move once the move ends: left at the altitude it was
     // given, the camera jumped onto ground that loaded during the move on the frame it ended.
-    if (!centerClampedToGround || !transitionNamedCenter || !terrainElevationIndex || !style->impl->getTerrain()) {
+    if (!centerClampedToGround || !cameraSetToCenter || !terrainElevationIndex || !style->impl->getTerrain()) {
         return;
     }
     auto center = transform.getTransitionCenter();
@@ -515,11 +517,7 @@ std::optional<double> Map::Impl::groundOnLineOfSight() const {
     if (!surface) {
         return std::nullopt;
     }
-    // The pick answers wrapped. Unwrapped for the shortest path to the centre, as
-    // Map::pixelForLatLngOnTerrain does: the index keys the DEM tiles by unwrapped x.
-    LatLng ground = *surface;
-    ground.unwrapForShortestPath(transform.getLatLng());
-    return index.getElevation(ground);
+    return groundAt(*surface);
 }
 
 bool Map::Impl::anchorCenterOnLineOfSight() {
@@ -532,12 +530,21 @@ bool Map::Impl::anchorCenterOnLineOfSight() {
 double Map::Impl::groundUnderCenter() const {
     // The height reported was sampled under the centre of the last frame drawn, which a jump since
     // may have moved anywhere; the map-side heights answer for the centre as it is now.
-    if (terrainElevationIndex) {
-        if (const auto ground = terrainElevationIndex->getElevation(transform.getLatLng())) {
-            return *ground;
-        }
+    if (const auto ground = groundAt(transform.getLatLng())) {
+        return *ground;
     }
     return terrainCenterElevation;
+}
+
+std::optional<double> Map::Impl::groundAt(LatLng latLng) const {
+    if (!terrainElevationIndex) {
+        return std::nullopt;
+    }
+    // At the longitude nearest the centre: the index keys the DEM tiles by unwrapped x, and near the
+    // antimeridian the ones drawn have wrap != 0.
+    latLng = latLng.wrapped();
+    latLng.unwrapForShortestPath(transform.getLatLng());
+    return terrainElevationIndex->getElevation(latLng);
 }
 
 bool Map::Impl::clampCenterToTerrain(double elevationMeters) {
@@ -553,12 +560,16 @@ bool Map::Impl::clampCenterToTerrain(double elevationMeters) {
     return true;
 }
 
-void Map::Impl::jumpTo(const CameraOptions& camera) {
+void Map::Impl::beginCameraChange(bool toCenter) {
     cameraMutated = true;
     settleCenterAwaitingSeaLevel();
-    // A jump cancels a running transition, and the camera it sets decides what the clamp keeps
-    // once heights arrive (onUpdate): a centre given, or else the camera.
-    transitionNamedCenter = camera.center.has_value();
+    // The camera set replaces any transition running, and decides what the clamp keeps once heights
+    // arrive (onUpdate): a centre given, or else the camera.
+    cameraSetToCenter = toCenter;
+}
+
+void Map::Impl::jumpTo(const CameraOptions& camera) {
+    beginCameraChange(camera.center.has_value());
     transform.jumpTo(camera);
     onUpdate();
 }
