@@ -6,6 +6,7 @@
 #include <mln/map/bound_options.hpp>
 #include <mln/map/camera.hpp>
 #include <mln/map/map_options.hpp>
+#include <mln/map/transform.hpp>
 #include <mln/math/angles.hpp>
 #include <mln/style/style.hpp>
 #include <mln/style/terrain.hpp>
@@ -878,18 +879,14 @@ TEST(TerrainCamera, EaseOntoGroundLoadedDuringTheMoveEndsWithoutAJump) {
 
     bool released = false;
     double releasedAt = 0.0;
-    double largestStep = 0.0;
-    double previous = test.eye()[2];
+    Rise rise;
+    rise.add(test.eye()[2]);
     ASSERT_TRUE(test.runTransition(
         [&](const AnimationOptions& animation) {
             test.map.easeTo(CameraOptions().withCenter(test.westTarget).withCenterAltitude(plateauMeters), animation);
         },
-        [&](bool finished) {
-            const double height = test.eye()[2];
-            if (!finished) {
-                largestStep = std::max(largestStep, std::abs(height - previous));
-            }
-            previous = height;
+        [&](bool) {
+            rise.add(test.eye()[2]);
             // A third of the way there, the plateau's heights arrive.
             const double longitude = test.map.getCameraOptions({}).center->longitude();
             if (!released && longitude < 0.0) {
@@ -905,8 +902,8 @@ TEST(TerrainCamera, EaseOntoGroundLoadedDuringTheMoveEndsWithoutAJump) {
     const auto camera = test.map.getCameraOptions({});
     EXPECT_NEAR(*camera.centerAltitude, westPlateauMeters, 5.0);
     EXPECT_NEAR(camera.center->longitude(), test.westTarget.longitude(), 1e-6);
-    // Eased: a 1000 m rise over the rest of the move, no step of it a jump.
-    EXPECT_LT(largestStep, 400.0 * mercatorMetre);
+    // Eased: the 1000 m rise takes most of the second the move had left, not one frame.
+    EXPECT_GE(rise.milliseconds(), 500.0);
 }
 
 // An animated move that leaves the centre where it is (a tilt, as the app gives one when 3D comes
@@ -923,27 +920,110 @@ TEST(TerrainCamera, TiltInPlaceEasesTheCentreAltitude) {
     ASSERT_NEAR(test.altitude(), 0.0, 1.0);
     const LatLng center = *test.map.getCameraOptions({}).center;
 
-    bool done = false;
-    double largestStep = 0.0;
-    double previous = test.altitude();
+    // The centre altitude rather than the camera's height, which the tilt changes too; in the
+    // mercator units Rise takes heights in.
+    Rise rise;
+    rise.add(test.altitude() * mercatorMetre);
     ASSERT_TRUE(test.runTransition(
         [&](const AnimationOptions& animation) {
             test.map.easeTo(CameraOptions().withCenter(center).withPitch(30.0).withCenterAltitude(plateauMeters),
                             animation);
         },
-        [&](bool finished) {
-            if (done) {
-                return;
-            }
-            const double altitude = test.altitude();
-            largestStep = std::max(largestStep, std::abs(altitude - previous));
-            previous = altitude;
-            done = finished;
-        }));
+        [&](bool) { rise.add(test.altitude() * mercatorMetre); }));
 
     EXPECT_NEAR(test.altitude(), plateauMeters, 5.0);
-    // Eased: no frame of the 1000 m rise is a jump.
-    EXPECT_LT(largestStep, 400.0);
+    // Eased: the 1000 m rise takes most of the 1.5 s move, not its last frame.
+    EXPECT_GE(rise.milliseconds(), 750.0);
+}
+
+// Heights that arrive in the last frames of a move were eased onto over what was left of it, a frame
+// or two, and the view moved by hundreds of points on one of them (Timberline, 351 pt, heights 0.1 s
+// before the end). The rest of the way takes 0.4 s instead, the move running on past its end until
+// it is on the ground.
+TEST(TerrainCamera, GroundArrivingAtTheEndOfAMoveIsEasedOnto) {
+    TerrainTransitionTest test;
+    test.holdWest = true;
+    ASSERT_TRUE(test.settleOnPlateau());
+
+    const auto start = Clock::now();
+    bool released = false;
+    Rise rise;
+    rise.add(test.eye()[2]);
+    ASSERT_TRUE(test.runTransition(
+        [&](const AnimationOptions& animation) {
+            test.map.easeTo(CameraOptions().withCenter(test.westTarget).withCenterAltitude(plateauMeters), animation);
+        },
+        [&](bool) {
+            rise.add(test.eye()[2]);
+            // 0.3 s before the 1.5 s move ends, the plateau's tiles arrive: their heights reach the
+            // map a few frames later.
+            if (!released && Clock::now() - start >= Milliseconds(1200)) {
+                test.holdWest = false;
+                released = true;
+            }
+            std::this_thread::sleep_for(Milliseconds(16));
+        }));
+    ASSERT_TRUE(released);
+    // And after the move, where heights that came later than it would have the clamp move the camera.
+    for (const auto until = Clock::now() + Milliseconds(500); Clock::now() < until;) {
+        test.renderFrame();
+        rise.add(test.eye()[2]);
+        std::this_thread::sleep_for(Milliseconds(16));
+    }
+
+    // On the plateau as the move ended, the 1000 m rise eased over 0.4 s, where it took what was left
+    // of the move, under 0.3 s.
+    EXPECT_GE(rise.milliseconds(), 350.0);
+    test.expectEyeAtEnd();
+    EXPECT_NEAR(test.altitude(), westPlateauMeters, 5.0);
+}
+
+// A transition's frames are drawn at the times the map gives them, all at once in a still render.
+// Whether new ground came too late for what is left of the move to carry the centre onto it, and
+// the 0.4 s the centre takes onto it then, go by those times rather than by the wall clock.
+TEST(TerrainCamera, LateGroundEasesOnTheFramesClock) {
+    Transform transform;
+    transform.resize({512, 512});
+    transform.jumpTo(CameraOptions().withCenter(LatLng(0.0, 0.0)).withZoom(10.0).withCenterAltitude(0.0));
+    transform.easeTo(CameraOptions().withCenter(LatLng(0.0, 0.01)).withCenterAltitude(0.0),
+                     AnimationOptions(Seconds(1)));
+    const TimePoint start = transform.getTransitionStart();
+    transform.updateTransitions(start + Milliseconds(900));
+    transform.retargetTransitionCenterAltitude(1000.0);
+
+    // At the move's end, a quarter of the way through the 0.4 s ease...
+    transform.updateTransitions(start + Milliseconds(1000));
+    EXPECT_TRUE(transform.inTransition());
+    EXPECT_LT(transform.getState().getCenterAltitude(), 500.0);
+    // ...and on the ground 0.4 s after it came.
+    transform.updateTransitions(start + Milliseconds(1300));
+    EXPECT_FALSE(transform.inTransition());
+    EXPECT_DOUBLE_EQ(transform.getState().getCenterAltitude(), 1000.0);
+}
+
+// Ground that changes again while the centre eases onto late ground (a finer tile arriving) is eased
+// onto from where the altitude has got to, at the pace it has, within the same 0.4 s. Restarted from
+// rest, the altitude stopped, and each change kept the move going 0.4 s more.
+TEST(TerrainCamera, LateGroundChangingAgainKeepsTheEase) {
+    Transform transform;
+    transform.resize({512, 512});
+    transform.jumpTo(CameraOptions().withCenter(LatLng(0.0, 0.0)).withZoom(10.0).withCenterAltitude(0.0));
+    transform.easeTo(CameraOptions().withCenter(LatLng(0.0, 0.01)).withCenterAltitude(0.0),
+                     AnimationOptions(Seconds(1)));
+    const TimePoint start = transform.getTransitionStart();
+    transform.updateTransitions(start + Milliseconds(900));
+    transform.retargetTransitionCenterAltitude(1000.0);
+    // Half way through the 0.4 s ease, the ground changes again.
+    transform.updateTransitions(start + Milliseconds(1100));
+    const double halfWay = transform.getState().getCenterAltitude();
+    ASSERT_NEAR(halfWay, 500.0, 1.0);
+    transform.retargetTransitionCenterAltitude(1200.0);
+
+    transform.updateTransitions(start + Milliseconds(1150));
+    EXPECT_GT(transform.getState().getCenterAltitude() - halfWay, 100.0) << "on the move";
+    transform.updateTransitions(start + Milliseconds(1300));
+    EXPECT_FALSE(transform.inTransition());
+    EXPECT_DOUBLE_EQ(transform.getState().getCenterAltitude(), 1200.0);
 }
 
 // A move that ends over ground whose heights haven't arrived (a cold cache, an easeTo across the
@@ -1030,6 +1110,29 @@ TEST(TerrainCamera, FreeCameraSetDuringATransitionIsKept) {
     for (int i = 0; i < 3; ++i) {
         EXPECT_NEAR(actual[i], eyeSet[i], mercatorMetre) << "axis " << i;
     }
+}
+
+// A setCenterAltitudeKeepingView that is refused moves nothing, and leaves the transition it would
+// have cut short running: the clamp still keeps the centre that transition was given.
+TEST(TerrainCamera, RefusedAltitudeChangeDuringATransitionKeepsItsCentre) {
+    TerrainTransitionTest test;
+    ASSERT_TRUE(test.settleOnPlateau());
+
+    bool refused = false;
+    ASSERT_TRUE(test.easeWest([&](bool finished) {
+        // Well over the 2000 m plateau, so the clamp has a new height waiting.
+        if (!finished && !refused && test.map.getCameraOptions({}).center->longitude() < -5.0) {
+            // Already at that altitude: nothing to move.
+            EXPECT_FALSE(test.map.setCenterAltitudeKeepingView(test.altitude()));
+            refused = true;
+        }
+    }));
+    ASSERT_TRUE(refused);
+
+    const auto camera = test.map.getCameraOptions({});
+    EXPECT_NEAR(camera.center->latitude(), test.westTarget.latitude(), 1e-6);
+    EXPECT_NEAR(camera.center->longitude(), test.westTarget.longitude(), 1e-6);
+    EXPECT_NEAR(*camera.centerAltitude, westPlateauMeters, 5.0);
 }
 
 // A jump to a centre while a transition runs arrives over other ground than the height the clamp
