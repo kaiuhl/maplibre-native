@@ -50,6 +50,11 @@ public:
     const util::TileElevationProvider* elevationProvider = nullptr;
     bool isUpdateSynchronous = false;
     bool captureRenderedFeatures = false;
+    /// Whether the cover always includes the tile under the map centre, in view or not. Set for the
+    /// 3D-terrain DEM source: the centre clamp needs the height there, and the elevation-aware
+    /// cover drops tiles whose ground stands above the camera, every one around a camera put
+    /// inside the terrain.
+    bool coverCenter = false;
 };
 
 } // namespace mln

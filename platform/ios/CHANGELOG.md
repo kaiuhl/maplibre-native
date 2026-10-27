@@ -8,6 +8,7 @@ MapLibre welcomes participation and contributions from everyone. Please read [`M
 - Add `MLNMapView.centerAltitude` and `-[MLNMapView setCenterAltitudeKeepingView:]`. With 3D terrain, a center coordinate and zoom level describe the same view only at the same center altitude, so save the altitude with a camera and restore it before setting the camera back ([#4712](https://github.com/maplibre/maplibre-native/pull/4712)).
 - With 3D terrain on and the centre clamp enabled, the clamp no longer cancels a running camera animation; the camera is anchored to the ground once the animation ends ([#4768](https://github.com/maplibre/maplibre-native/pull/4768)).
 - With 3D terrain on and the centre clamp enabled, turning the terrain on at a high zoom over high ground, or the terrain data arriving there, no longer leaves the camera inside the ground with a blank map until the next gesture: the centre is put on the ground as soon as its height is known, keeping the zoom ([#XXXX](https://github.com/maplibre/maplibre-native/pull/XXXX)).
+- With 3D terrain on and the centre clamp enabled, a camera that the ground has swallowed (a centre at sea level over high ground at a high zoom) is put back above it however its elevation data arrives. Where the data under the center came in after the data beside it, it was dropped while still loading and never asked for again, and the map stayed blank until the next gesture ([#XXXX](https://github.com/maplibre/maplibre-native/pull/XXXX)).
 
 ## 7.0.0-pre2
 

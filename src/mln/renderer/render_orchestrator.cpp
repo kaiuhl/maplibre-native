@@ -523,6 +523,7 @@ std::unique_ptr<RenderTree> RenderOrchestrator::createRenderTree(
         }
 
         tileParameters.isUpdateSynchronous = sourceImpl->isUpdateSynchronous();
+        tileParameters.coverCenter = terrainEnabled && sourceImpl->id == renderTerrain->getSourceID();
         source->update(sourceImpl, filteredLayersForSource, sourceNeedsRendering, sourceNeedsRelayout, tileParameters);
         filteredLayersForSource.clear();
 
