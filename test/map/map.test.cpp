@@ -49,6 +49,7 @@
 #include <mln/util/run_loop.hpp>
 #include <mln/util/timer.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <thread>
 
@@ -562,12 +563,10 @@ TEST(Map, DefaultBoundOptions) {
     EXPECT_EQ(*bounds.bounds, LatLngBounds());
 }
 
-// An app lowering the maximum pitch under the camera's from its camera-is-changing callback while
-// an animated move runs, as one whose bound follows the zoom does on every frame. The pitch is
-// clamped with a jump, which cancels the move where it is, as it does from anywhere else. The move
-// ran on with the jump's duration of zero instead, which took it to its destination on the next
-// frame, and nothing finished it.
-TEST(Map, SetBoundsFromCameraIsChangingCancelsTheTransition) {
+namespace {
+// A continuous map with an empty style, driven frame by frame on the clock, that logs its camera
+// events ("willA didA willI didI ") and gives its camera-is-changing callback to the test.
+struct CameraMoveTest {
     struct Observer : MapObserver {
         std::string log;
         std::function<void()> isChanging;
@@ -584,40 +583,180 @@ TEST(Map, SetBoundsFromCameraIsChangingCancelsTheTransition) {
 
     util::RunLoop runLoop;
     Observer observer;
-    HeadlessFrontend frontend(1.0f);
-    MapAdapter map(frontend,
+    HeadlessFrontend frontend{1.0f};
+    MapAdapter map{frontend,
                    observer,
                    std::make_shared<StubFileSource>(ResourceOptions::Default(), ClientOptions()),
-                   MapOptions().withMapMode(MapMode::Continuous).withSize(frontend.getSize()));
-    map.getStyle().loadJSON(R"({"version": 8, "sources": {}, "layers": []})");
-    map.jumpTo(CameraOptions().withCenter(LatLng{0, 0}).withZoom(10).withPitch(60));
-    observer.log.clear();
-
+                   MapOptions().withMapMode(MapMode::Continuous).withSize(frontend.getSize())};
     int finished = 0;
-    AnimationOptions animation(Milliseconds(500));
-    animation.transitionFinishFn = [&] {
-        ++finished;
-    };
-    std::optional<CameraOptions> capped;
-    observer.isChanging = [&] {
-        if (capped) return;
-        map.setBounds(BoundOptions().withMaxPitch(30));
-        capped = map.getCameraOptions();
-    };
-    const TimePoint start = Clock::now();
-    map.easeTo(CameraOptions().withCenter(LatLng{0, 1}), animation);
-    while (Clock::now() - start < Milliseconds(750)) {
-        std::this_thread::sleep_for(Milliseconds(16));
-        map.triggerRepaint();
+    std::optional<CameraOptions> cameraAtFinish;
+
+    CameraMoveTest() { map.getStyle().loadJSON(R"({"version": 8, "sources": {}, "layers": []})"); }
+
+    /// Options for a move of `duration` that count its finishes and keep the camera it finished at.
+    AnimationOptions animation(Duration duration) {
+        AnimationOptions options(duration);
+        options.transitionFinishFn = [this] {
+            ++finished;
+            cameraAtFinish = map.getCameraOptions();
+        };
+        return options;
     }
 
-    ASSERT_TRUE(capped);
+    /// Draws a frame every 16 ms until the move finishes, however long that takes the clock under
+    /// load (ten seconds at most), and a few frames after.
+    void runUntilFinished() {
+        const TimePoint start = Clock::now();
+        while (!finished && Clock::now() - start < Seconds(10)) {
+            std::this_thread::sleep_for(Milliseconds(16));
+            map.triggerRepaint();
+        }
+        for (int i = 0; i < 3; ++i) {
+            std::this_thread::sleep_for(Milliseconds(16));
+            map.triggerRepaint();
+        }
+    }
+};
+
+/// The pitch bound of an app that bounds the pitch by the zoom: 60 degrees from z8 up, flat from z7
+/// down, and from one to the other in between.
+double pitchBoundAtZoom(double zoom) {
+    return 60.0 * std::clamp(zoom - 7.0, 0.0, 1.0);
+}
+
+/// A frame of a move as such an app's camera-is-changing callback saw it: the zoom and pitch the
+/// frame drew, the bound it drew them under, and the bound and pitch the callback left.
+struct BoundedFrame {
+    double zoom;
+    double pitch;
+    double drawnUnder;
+    double bound;
+    double pitchAfter;
+};
+
+/// Bounds the pitch by the zoom as such an app does, from its camera-is-changing callback on every
+/// frame of a move.
+BoundedFrame boundPitchByZoom(Map& map) {
     const CameraOptions camera = map.getCameraOptions();
-    EXPECT_DOUBLE_EQ(capped->center->longitude(), camera.center->longitude());
-    EXPECT_LT(camera.center->longitude(), 0.5);
+    BoundedFrame frame{*camera.zoom, *camera.pitch, *map.getBounds().maxPitch, pitchBoundAtZoom(*camera.zoom), 0.0};
+    map.setBounds(BoundOptions().withMaxPitch(frame.bound));
+    frame.pitchAfter = *map.getCameraOptions().pitch;
+    return frame;
+}
+
+/// Every frame drew within the bound in force as it drew, and was left within the one its callback
+/// set.
+void expectWithinPitchBounds(const std::vector<BoundedFrame>& frames) {
+    for (size_t i = 0; i < frames.size(); ++i) {
+        const BoundedFrame& frame = frames[i];
+        EXPECT_LE(frame.pitch, frame.drawnUnder + 1e-9) << "frame " << i << " at z" << frame.zoom;
+        EXPECT_LE(frame.pitchAfter, frame.bound + 1e-9) << "frame " << i << " at z" << frame.zoom;
+    }
+}
+} // namespace
+
+// A tilted flight under an app that bounds the pitch by the zoom from its camera-is-changing
+// callback: the bound falls under the pitch as the flight zooms out past z8, and rises again as it
+// comes back in. The flight goes on to where it was going, each frame within the bound as it is,
+// finishes once as it arrives, and arrives at the pitch it was given, within the bound it arrives
+// under. The bound clamped the pitch with a jump, which cancelled the flight where it first fell
+// below the pitch.
+TEST(Map, FlightGoesOnUnderAPitchBoundThatFollowsTheZoom) {
+    CameraMoveTest test;
+    test.map.jumpTo(CameraOptions().withCenter(LatLng{0, 0}).withZoom(10).withPitch(60));
+    test.observer.log.clear();
+    std::vector<BoundedFrame> frames;
+    test.observer.isChanging = [&] {
+        frames.push_back(boundPitchByZoom(test.map));
+    };
+
+    test.map.flyTo(CameraOptions().withCenter(LatLng{0, 10}).withZoom(10).withPitch(60), test.animation(Seconds(1)));
+    test.runUntilFinished();
+
+    ASSERT_FALSE(frames.empty());
+    const auto lowest = std::min_element(
+        frames.begin(), frames.end(), [](const auto& a, const auto& b) { return a.zoom < b.zoom; });
+    EXPECT_LT(lowest->zoom, 7.0);
+    EXPECT_EQ(0.0, lowest->pitchAfter);
+    expectWithinPitchBounds(frames);
+
+    const CameraOptions camera = test.map.getCameraOptions();
+    EXPECT_EQ(1, test.finished);
+    EXPECT_NEAR(0.0, camera.center->latitude(), 1e-6);
+    EXPECT_NEAR(10.0, camera.center->longitude(), 1e-6);
+    EXPECT_NEAR(10.0, *camera.zoom, 1e-6);
+    EXPECT_NEAR(std::min(60.0, *test.map.getBounds().maxPitch), *camera.pitch, 1e-9);
+    ASSERT_TRUE(test.cameraAtFinish);
+    EXPECT_EQ(camera.center, test.cameraAtFinish->center);
+    EXPECT_EQ(camera.zoom, test.cameraAtFinish->zoom);
+    EXPECT_EQ(camera.pitch, test.cameraAtFinish->pitch);
+    EXPECT_EQ("willA didA ", test.observer.log);
+}
+
+// The same for an ease out past z8 within LatLngBounds, where easeTo eases with frames of its own
+// rather than flyTo's: it goes on to where it was going and arrives flat, the bound at its zoom.
+TEST(Map, EaseGoesOnUnderAPitchBoundThatFollowsTheZoom) {
+    CameraMoveTest test;
+    test.map.setBounds(BoundOptions().withLatLngBounds(LatLngBounds::hull({-20, -20}, {20, 20})));
+    test.map.jumpTo(CameraOptions().withCenter(LatLng{0, 0}).withZoom(10).withPitch(60));
+    test.observer.log.clear();
+    std::vector<BoundedFrame> frames;
+    test.observer.isChanging = [&] {
+        frames.push_back(boundPitchByZoom(test.map));
+    };
+
+    test.map.easeTo(CameraOptions().withCenter(LatLng{0, 1}).withZoom(6), test.animation(Seconds(1)));
+    test.runUntilFinished();
+
+    ASSERT_FALSE(frames.empty());
+    EXPECT_LT(frames.back().zoom, 7.0);
+    expectWithinPitchBounds(frames);
+
+    const CameraOptions camera = test.map.getCameraOptions();
+    EXPECT_EQ(1, test.finished);
+    EXPECT_NEAR(0.0, camera.center->latitude(), 1e-6);
+    EXPECT_NEAR(1.0, camera.center->longitude(), 1e-6);
+    EXPECT_NEAR(6.0, *camera.zoom, 1e-6);
+    EXPECT_NEAR(std::min(60.0, *test.map.getBounds().maxPitch), *camera.pitch, 1e-9);
+    ASSERT_TRUE(test.cameraAtFinish);
+    EXPECT_EQ(camera.center, test.cameraAtFinish->center);
+    EXPECT_EQ(camera.zoom, test.cameraAtFinish->zoom);
+    EXPECT_EQ(camera.pitch, test.cameraAtFinish->pitch);
+    EXPECT_EQ("willA didA ", test.observer.log);
+}
+
+// Map::setBounds bringing the camera within new pitch and zoom bounds: outside a move it jumps
+// there, as it always has. While a move runs, set from outside its frames, it brings the camera
+// within them where the move is, and the move goes on to where it was going within them. The jump
+// cancelled the move.
+TEST(Map, SetBoundsWhileAMoveRunsLetsItGoOn) {
+    CameraMoveTest test;
+    test.map.jumpTo(CameraOptions().withCenter(LatLng{0, 0}).withZoom(10).withPitch(60));
+    test.observer.log.clear();
+
+    test.map.setBounds(BoundOptions().withMaxPitch(30).withMaxZoom(9));
+    CameraOptions camera = test.map.getCameraOptions();
     EXPECT_NEAR(30.0, *camera.pitch, 1e-9);
-    EXPECT_EQ(1, finished);
-    EXPECT_EQ("willA didA willI didI ", observer.log);
+    EXPECT_NEAR(9.0, *camera.zoom, 1e-9);
+    EXPECT_EQ("willI didI ", test.observer.log);
+    test.map.setBounds(BoundOptions().withMaxPitch(60).withMaxZoom(util::DEFAULT_MAX_ZOOM));
+    test.map.jumpTo(CameraOptions().withZoom(10).withPitch(60));
+    test.observer.log.clear();
+
+    test.map.easeTo(CameraOptions().withCenter(LatLng{0, 1}), test.animation(Milliseconds(500)));
+    test.map.setBounds(BoundOptions().withMaxPitch(30).withMaxZoom(9));
+    camera = test.map.getCameraOptions();
+    EXPECT_NEAR(30.0, *camera.pitch, 1e-9);
+    EXPECT_NEAR(9.0, *camera.zoom, 1e-9);
+    EXPECT_EQ(0, test.finished);
+    test.runUntilFinished();
+
+    camera = test.map.getCameraOptions();
+    EXPECT_EQ(1, test.finished);
+    EXPECT_NEAR(1.0, camera.center->longitude(), 1e-6);
+    EXPECT_NEAR(9.0, *camera.zoom, 1e-9);
+    EXPECT_NEAR(30.0, *camera.pitch, 1e-9);
+    EXPECT_EQ("willA didA ", test.observer.log);
 }
 
 TEST(Map, MapOptions) {

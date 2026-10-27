@@ -36,6 +36,8 @@
 
 - *...Add new stuff here...*
 - [core] Fix an animated camera move going to its destination in one frame, without finishing, when the camera is set from `onCameraIsChanging` while it runs, as `Map::setBounds` lowering the maximum pitch below the camera's does. The camera set now cancels the move where it is, as one set at any other time does.
+- [core] Fix an animated camera move ending early when `Map::setBounds` is called while it runs, as an app bounding the pitch by the zoom does from `onCameraIsChanging`. The camera is brought within the new bounds where it is, and the move goes on to its destination within them. Each frame keeps to the pitch bounds as they are, which `flyTo`'s (and `easeTo`'s without LatLngBounds) did not, and goes back to the move's pitch when a bound that held it down moves away.
+- [core] Fix `flyTo`, and an animated `easeTo` without LatLngBounds, to a camera with a roll setting the pitch to the roll and leaving the roll as it was.
 - [core] Answer cache-only requests for a remote PMTiles archive from the ambient cache instead of the network, so tiles panned past no longer hold the network request slots the visible tiles need.
 - [core] Cancel a PMTiles request's archive fetches when the request is cancelled, and free them once it's answered, instead of keeping them for the life of the file source.
 - [core] Fix PMTiles tiles intermittently failing to load with `Error parsing PMTiles directory: map::at: key not found` after several requests loaded the same directory at once.

@@ -362,7 +362,15 @@ void Map::setBounds(const BoundOptions& options) {
     }
 
     if (changeCamera) {
-        jumpTo(cameraOptions);
+        if (impl->transform.inTransition() || impl->transform.isUpdatingTransition()) {
+            // A move under way goes on within the new bounds: the camera comes within them where it
+            // is, and the move's frames keep it there. A jump would cancel the move short of where it
+            // was going: a tilted flight stopped where an app bounding the pitch by the zoom from
+            // onCameraIsChanging first lowered the bound below its pitch.
+            impl->transform.clampToBounds();
+        } else {
+            jumpTo(cameraOptions);
+        }
     }
 }
 

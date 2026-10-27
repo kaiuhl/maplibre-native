@@ -77,6 +77,9 @@ public:
 
     void setMinPitch(double);
     void setMaxPitch(double);
+    /// Brings the zoom and pitch within the bounds where the camera is, at once, without a
+    /// transition and leaving a running one to go on: its frames keep within the bounds as they are.
+    void clampToBounds();
 
     // Zoom
 
@@ -112,6 +115,9 @@ public:
 
     // Transitions
     bool inTransition() const;
+    /// Whether a transition's frame is running, its callbacks (onCameraIsChanging) included, and the
+    /// transition is still under way: inTransition() is false then, updateTransitions holding it.
+    bool isUpdatingTransition() const;
     void updateTransitions(const TimePoint& now);
     TimePoint getTransitionStart() const { return transitionStart; }
     Duration getTransitionDuration() const { return transitionDuration; }
@@ -210,6 +216,8 @@ private:
     /// Counts the transitions started and cancelled, so that updateTransitions can tell that a
     /// camera set from its frame's callbacks (onCameraIsChanging) ended the transition it runs.
     uint64_t transitionGeneration = 0;
+    /// The generation of the transition whose frame updateTransitions is running, if any.
+    std::optional<uint64_t> updatingTransitionGeneration;
 };
 
 } // namespace mln
