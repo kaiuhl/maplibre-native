@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <cmath>
 #include <functional>
+#include <memory>
 #include <optional>
 
 namespace mln {
@@ -116,6 +117,13 @@ public:
     TimePoint getTransitionStart() const { return transitionStart; }
     Duration getTransitionDuration() const { return transitionDuration; }
     void cancelTransitions();
+    /// The centre a running transition was given to arrive at, as it arrives there; nullopt without
+    /// a transition or for one with no centre of its own (moveBy, rotateBy, a zoom around an anchor).
+    std::optional<LatLng> getTransitionCenter() const;
+    /// Moves the centre altitude a running transition arrives at to `altitudeMeters`, carrying on
+    /// from the altitude it has reached so that nothing jumps (gl-js's Camera._updateElevation).
+    /// Nothing without a transition, or on its last frame.
+    void retargetTransitionCenterAltitude(double altitudeMeters);
 
     // Gesture
     void setGestureInProgress(bool);
@@ -158,6 +166,15 @@ private:
 
     TimePoint transitionStart;
     Duration transitionDuration;
+    /// The centre altitude the running transition eases from and to, how far along it is (the
+    /// eased fraction its frame was last given), and the centre it was given.
+    struct CenterAltitudeEase {
+        double start = 0.0;
+        double target = 0.0;
+        double progress = 0.0;
+        std::optional<LatLng> center;
+    };
+    std::shared_ptr<CenterAltitudeEase> centerAltitudeEase;
     std::function<bool(const TimePoint)> transitionFrameFn;
     std::function<void()> transitionFinishFn;
 };

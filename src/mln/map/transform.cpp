@@ -174,6 +174,11 @@ void Transform::easeTo(const CameraOptions& inputCamera, const AnimationOptions&
                             .withScalingInProgress(zoom != startZoom)
                             .withRotatingInProgress(bearing != startBearing));
     const EdgeInsets startEdgeInsets = state.getEdgeInsets();
+    const auto altitudeEase = std::make_shared<CenterAltitudeEase>(CenterAltitudeEase{
+        .start = startCenterAlt,
+        .target = centerAlt,
+        .progress = 0.0,
+        .center = camera.center ? std::optional<LatLng>(latLng) : std::nullopt});
 
     startTransition(
         camera,
@@ -183,7 +188,8 @@ void Transform::easeTo(const CameraOptions& inputCamera, const AnimationOptions&
             LatLng frameLatLng = Projection::unproject(framePoint, state.zoomScale(startZoom));
             double frameZoom = util::interpolate(startZoom, zoom, t);
             state.setLatLngZoom(frameLatLng, frameZoom);
-            state.setCenterAltitude(util::interpolate(startCenterAlt, centerAlt, t));
+            altitudeEase->progress = t;
+            state.setCenterAltitude(util::interpolate(altitudeEase->start, altitudeEase->target, t));
             if (bearing != startBearing) {
                 state.setBearing(util::wrap(util::interpolate(startBearing, bearing, t), -pi, pi));
             }
@@ -207,6 +213,8 @@ void Transform::easeTo(const CameraOptions& inputCamera, const AnimationOptions&
             }
         },
         duration);
+    // After startTransition: the previous transition finishing may start another one.
+    centerAltitudeEase = altitudeEase;
 }
 
 /** This method implements an “optimal path” animation, as detailed in:
@@ -352,6 +360,11 @@ void Transform::flyTo(const CameraOptions& inputCamera,
         TransformStateProperties().withPanningInProgress(true).withScalingInProgress(true).withRotatingInProgress(
             bearing != startBearing));
     const EdgeInsets startEdgeInsets = state.getEdgeInsets();
+    const auto altitudeEase = std::make_shared<CenterAltitudeEase>(CenterAltitudeEase{
+        .start = startCenterAlt,
+        .target = centerAlt,
+        .progress = 0.0,
+        .center = camera.center ? std::optional<LatLng>(latLng) : std::nullopt});
 
     startTransition(
         camera,
@@ -375,7 +388,8 @@ void Transform::flyTo(const CameraOptions& inputCamera,
             // Convert to geographic coordinates and set the new viewpoint.
             LatLng frameLatLng = Projection::unproject(framePoint, startScale);
             state.setLatLngZoom(frameLatLng, frameZoom);
-            state.setCenterAltitude(util::interpolate(startCenterAlt, centerAlt, us));
+            altitudeEase->progress = us;
+            state.setCenterAltitude(util::interpolate(altitudeEase->start, altitudeEase->target, us));
             if (bearing != startBearing) {
                 state.setBearing(util::wrap(util::interpolate(startBearing, bearing, k), -pi, pi));
             }
@@ -399,6 +413,8 @@ void Transform::flyTo(const CameraOptions& inputCamera,
             }
         },
         duration);
+    // After startTransition: the previous transition finishing may start another one.
+    centerAltitudeEase = altitudeEase;
 }
 
 // MARK: - Position
@@ -712,6 +728,26 @@ void Transform::cancelTransitions() {
 
     transitionFrameFn = nullptr;
     transitionFinishFn = nullptr;
+}
+
+std::optional<LatLng> Transform::getTransitionCenter() const {
+    return inTransition() && centerAltitudeEase ? centerAltitudeEase->center : std::nullopt;
+}
+
+void Transform::retargetTransitionCenterAltitude(double altitudeMeters) {
+    if (!inTransition() || !centerAltitudeEase) {
+        return;
+    }
+    CenterAltitudeEase& ease = *centerAltitudeEase;
+    const double k = ease.progress;
+    if (k >= 1.0 || altitudeMeters == ease.target) {
+        return;
+    }
+    // From the altitude reached at k, the rest of the way to the new target over what is left of
+    // the transition: start' + (target' - start')·k is where the transition is now.
+    const double current = util::interpolate(ease.start, ease.target, k);
+    ease.start = (current - k * altitudeMeters) / (1.0 - k);
+    ease.target = altitudeMeters;
 }
 
 void Transform::setGestureInProgress(bool inProgress) {
