@@ -43,15 +43,6 @@ const double* getColumn(const mat4& matrix, int col) noexcept {
     return &matrix[col * 4];
 }
 
-vec3 toMercator(const LatLng& location, double altitudeMeters) noexcept {
-    const double pixelsPerMeter = 1.0 / Projection::getMetersPerPixelAtLatitude(location.latitude(), 0.0);
-    const double worldSize = Projection::worldSize(std::pow(2.0, 0.0));
-
-    return {{mercatorXfromLng(location.longitude()),
-             mercatorYfromLat(location.latitude()),
-             altitudeMeters * pixelsPerMeter / worldSize}};
-}
-
 Quaternion orientationFromRollPitchBearing(double roll, double pitch, double bearing) noexcept {
     // Both angles have to be negated to achieve CW rotation around the axis of rotation
     Quaternion rotBearing = Quaternion::fromAxisAngle({{0.0, 0.0, 1.0}}, -bearing);
@@ -82,6 +73,15 @@ void updateTransform(mat4& transform, const vec3& position) {
 }
 
 } // namespace
+
+vec3 toMercator(const LatLng& location, double altitudeMeters) noexcept {
+    const double pixelsPerMeter = 1.0 / Projection::getMetersPerPixelAtLatitude(location.latitude(), 0.0);
+    const double worldSize = Projection::worldSize(std::pow(2.0, 0.0));
+
+    return {{mercatorXfromLng(location.longitude()),
+             mercatorYfromLat(location.latitude()),
+             altitudeMeters * pixelsPerMeter / worldSize}};
+}
 
 Camera::Camera() noexcept
     : orientation(Quaternion::identity) {
