@@ -73,9 +73,9 @@ struct TerrainProjectionTest {
     HeadlessFrontend frontend{{256, 256}, 1};
     MapAdapter map;
 
-    TerrainProjectionTest()
+    explicit TerrainProjectionTest(MapObserver& observer = MapObserver::nullObserver())
         : map(frontend,
-              MapObserver::nullObserver(),
+              observer,
               fileSource,
               MapOptions().withMapMode(MapMode::Static).withSize(frontend.getSize())) {
         fileSource->tileResponse = [this](const Resource&) {
@@ -426,6 +426,49 @@ TEST(TerrainElevationIndex, CameraUnderTheTerrainIsRaisedOntoIt) {
     EXPECT_NEAR(*camera.bearing, 30.0, 1e-6);
     EXPECT_NEAR(camera.center->latitude(), innsbruck.latitude(), 1e-6);
     EXPECT_NEAR(camera.center->longitude(), innsbruck.longitude(), 1e-6);
+}
+
+namespace {
+
+// Counts the camera changes the map makes.
+struct CameraChanges : MapObserver {
+    int count = 0;
+    void onCameraWillChange(CameraChangeMode) override { ++count; }
+};
+
+} // namespace
+
+// The lift puts the eye on the ground in one go, and once there it stays. Looking south from 5 km
+// north of its centre, the eye is a few hundredths of a degree further north, where the same height
+// in world units is fewer metres: lifted onto the ground in metres at the centre, it came up short of
+// it, and was lifted again by nothing on every frame after (the app, restoring its camera after a
+// style reload: 60-340 times in 50 ms, 1.6 m short).
+TEST(TerrainElevationIndex, CameraUnderTheTerrainIsRaisedOntoItInOneGo) {
+    CameraChanges changes;
+    TerrainProjectionTest test(changes);
+    test.map.setBounds(BoundOptions().withMaxPitch(85.0));
+    test.render(4);
+    ASSERT_TRUE(test.map.getTerrainElevation(innsbruck));
+
+    test.map.jumpTo(CameraOptions().withCenter(innsbruck).withZoom(12.0).withPitch(80.0).withBearing(180.0));
+    const auto under = test.map.getFreeCameraOptions().getLocation();
+    ASSERT_TRUE(under);
+    ASSERT_LT(under->altitude, plateauMeters);
+    ASSERT_GT(under->location.latitude(), innsbruck.latitude() + 0.03);
+
+    test.render(1);
+    const auto lifted = test.map.getFreeCameraOptions().getLocation();
+    ASSERT_TRUE(lifted);
+    const auto ground = test.map.getTerrainElevation(lifted->location);
+    ASSERT_TRUE(ground);
+    EXPECT_GE(lifted->altitude, *ground);
+    EXPECT_NEAR(lifted->altitude, *ground, 0.01);
+    EXPECT_NEAR(lifted->location.latitude(), under->location.latitude(), 1e-9);
+    EXPECT_NEAR(lifted->location.longitude(), under->location.longitude(), 1e-9);
+
+    changes.count = 0;
+    test.render(3);
+    EXPECT_EQ(changes.count, 0) << "the camera was lifted again";
 }
 
 // A camera above the ground, or one with no terrain under it, is left where it is.

@@ -447,25 +447,27 @@ void Map::Impl::keepCameraAboveTerrain() {
     if (!ground || eye->altitude >= *ground) {
         return;
     }
-    const CameraOptions camera = transform.getCameraOptions(std::nullopt);
-    if (!camera.center || !camera.zoom) {
-        return;
-    }
     // From the eye put back on the ground, at the same place, to the same centre: the pitch is
     // the angle of the line between them off the vertical, and the zoom is the one that puts
     // the centre that far along it (gl-js's calculateCameraOptionsFromTo).
-    const double rise = *ground - state.getCenterAltitude();
+    //
+    // In world units, as the transform places the eye. A height in metres is a different number
+    // of them at the eye's latitude than at the centre's, kilometres away, and the eye's altitude
+    // is read at its own (FreeCameraOptions::getLocation): worked out in metres at the centre, the
+    // lift left an eye north of the centre short of the ground (1.6 m in the app), and lifted it
+    // again on every frame after without getting it there. A millimetre over the ground, so that
+    // rounding can't leave it under.
+    const double worldSize = Projection::worldSize(state.getScale());
+    const double cameraToCenter = state.getCameraToCenterDistance();
+    const double across = cameraToCenter * std::sin(state.getPitch()) / worldSize;
+    const double metresPerUnit = Projection::getMetersPerPixelAtLatitude(eye->location.latitude(), 0.0) *
+                                 Projection::worldSize(1.0);
+    const double rise = (*ground + 0.001) / metresPerUnit - state.getZ() / worldSize;
     if (rise <= 0.0) {
         return; // looking up at the centre, past what a pitch below 90 degrees can show
     }
-    const double scale = state.getScale();
-    const Point<double> eyePoint = Projection::project(eye->location, scale);
-    const Point<double> centrePoint = Projection::project(*camera.center, scale);
-    const double metresPerPixel = Projection::getMetersPerPixelAtLatitude(camera.center->latitude(), *camera.zoom);
-    const double across = std::hypot(eyePoint.x - centrePoint.x, eyePoint.y - centrePoint.y) * metresPerPixel;
-    const double distance = std::hypot(across, rise);
     const double pitch = util::rad2deg(std::atan2(across, rise));
-    const double zoom = *camera.zoom + std::log2(metresPerPixel * state.getCameraToCenterDistance() / distance);
+    const double zoom = std::log2(cameraToCenter / (std::hypot(across, rise) * util::tileSize_D));
     transform.jumpTo(CameraOptions().withPitch(pitch).withZoom(zoom));
 }
 
