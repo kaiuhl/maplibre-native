@@ -742,20 +742,10 @@ void Renderer::Impl::render(const RenderTree& renderTree, const std::shared_ptr<
         terrainCoverRetryFrames = 4;
     }
 
-    // Report the rendered terrain height under the map centre. Only the render side has the
-    // DEM, so this is the channel; whether the camera acts on it is the map's call
-    // (Map::setCenterClampedToGround). Gated so a still map does not post a message a frame.
-    if (auto* terrain = orchestrator.getRenderTerrain()) {
-        const double centerElevation =
-            terrain->getElevationForLatLng(updateParameters->transformState.getLatLng()).value_or(0.0);
-        if (std::abs(centerElevation - lastReportedCenterElevation) > 0.25) {
-            lastReportedCenterElevation = centerElevation;
-            observer->onTerrainCenterElevationChanged(centerElevation);
-        }
-    }
-
     // Hand the map side a fresh copy of the terrain heights whenever the loaded DEM tiles change
-    // (RenderTerrain::updateElevationIndex), and null when terrain goes away.
+    // (RenderTerrain::updateElevationIndex), and null when terrain goes away. Ahead of the height
+    // below, which the map acts on with these heights (Map::setCenterClampedToGround): a DEM tile
+    // that changed the ground under the centre is in them by then.
     {
         std::shared_ptr<const TerrainElevationIndex> elevationIndex;
         if (auto* terrain = orchestrator.getRenderTerrain()) {
@@ -766,6 +756,23 @@ void Renderer::Impl::render(const RenderTree& renderTree, const std::shared_ptr<
             reportedElevationIndex = elevationIndex;
             observer->onTerrainElevationIndexChanged(std::move(elevationIndex));
         }
+    }
+
+    // Report the rendered terrain height under the map centre. Only the render side has the
+    // DEM, so this is the channel; whether the camera acts on it is the map's call
+    // (Map::setCenterClampedToGround). Gated so a still map does not post a message a frame.
+    // The gate forgets the last height while there is no terrain: the map returned the centre to
+    // sea level when the terrain went, and a terrain that comes back over the same ground (a style
+    // reload) has to report that ground again for the clamp to put the centre back on it.
+    if (auto* terrain = orchestrator.getRenderTerrain()) {
+        const double centerElevation =
+            terrain->getElevationForLatLng(updateParameters->transformState.getLatLng()).value_or(0.0);
+        if (!lastReportedCenterElevation || std::abs(centerElevation - *lastReportedCenterElevation) > 0.25) {
+            lastReportedCenterElevation = centerElevation;
+            observer->onTerrainCenterElevationChanged(centerElevation);
+        }
+    } else {
+        lastReportedCenterElevation.reset();
     }
 
     auto stats = std::make_shared<gfx::RenderingStats>(context.threadSafeCopyRenderingStats());

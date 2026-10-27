@@ -630,6 +630,139 @@ TEST(TerrainCamera, ClampAfterAFlingKeepsTheCamera) {
     test.expectEyeAtEnd();
 }
 
+// Heights that change once a fling has come to rest (a finer DEM tile landing; here the terrain
+// grows by a tenth) are the ground changing under a camera that is not moving. The clamp keeping
+// the centre and zoom would move the camera by the change and jump the whole view a frame after it
+// stopped: the camera stays, and the centre moves along the line of sight onto the new ground.
+TEST(TerrainCamera, HeightsChangingAfterAFlingKeepTheCamera) {
+    TerrainTransitionTest test;
+    ASSERT_TRUE(test.settleOnPlateau());
+    ASSERT_TRUE(test.flingWest());
+    ASSERT_NEAR(test.altitude(), westPlateauMeters, 5.0);
+    const vec3 rested = test.eye();
+    const double zoomRested = *test.map.getCameraOptions({}).zoom;
+
+    test.map.getStyle().getTerrain()->setExaggeration(1.1f);
+    for (int i = 0; i < 20; ++i) {
+        test.renderFrame();
+    }
+
+    EXPECT_NEAR(test.altitude(), westPlateauMeters * 1.1, 5.0);
+    const vec3 actual = test.eye();
+    for (int i = 0; i < 3; ++i) {
+        EXPECT_NEAR(actual[i], rested[i], mercatorMetre) << "axis " << i;
+    }
+    // Nearer the ground by 200 m, so further in
+    EXPECT_GT(*test.map.getCameraOptions({}).zoom, zoomRested);
+}
+
+// A fling that ends uphill at the maximum zoom: keeping the camera would put the centre on ground
+// close enough to zoom past it, and the clamp keeping the centre and zoom instead jumped the whole
+// view up (Rocky Butte at z16.8, 130 pt). The camera stays, and the centre goes as far along the
+// line of sight as the maximum zoom allows.
+TEST(TerrainCamera, FlingEndingPastMaxZoomKeepsTheCamera) {
+    TerrainTransitionTest test;
+    ASSERT_TRUE(test.settleOnPlateau());
+    // At z2 the 1000 m rise takes the camera 0.0006 zoom levels nearer the ground.
+    const double maxZoom = *test.map.getCameraOptions({}).zoom + 0.0002;
+    test.map.setBounds(BoundOptions().withMaxZoom(maxZoom));
+
+    ASSERT_TRUE(test.flingWest());
+    ASSERT_LT(test.centerAtEnd.longitude(), -5.0);
+
+    test.expectEyeAtEnd();
+    const auto camera = test.map.getCameraOptions({});
+    EXPECT_NEAR(*camera.zoom, maxZoom, 1e-5);
+    EXPECT_GT(*camera.centerAltitude, plateauMeters + 100.0);
+    EXPECT_LT(*camera.centerAltitude, westPlateauMeters - 100.0);
+}
+
+// A drag across a 1000 m step in the terrain. The clamp keeping the centre and zoom on every
+// height a drag brings under the centre lifted the camera with the ground: 1000 m in one frame
+// here, up to 124 m a frame dragging over a mountainside. The camera moves level instead, and
+// stays where the drag left it once the finger lifts.
+TEST(TerrainCamera, DragAcrossAStepKeepsTheCameraLevel) {
+    TerrainTransitionTest test;
+    ASSERT_TRUE(test.settleOnPlateau());
+
+    test.map.setGestureInProgress(true);
+    test.map.anchorCenterOnTerrain();
+    double previous = test.eye()[2];
+    double largestStep = 0.0;
+    for (int i = 0; i < 30; ++i) {
+        test.map.moveBy({10.0, 0.0});
+        test.renderFrame();
+        const double height = test.eye()[2];
+        largestStep = std::max(largestStep, std::abs(height - previous));
+        previous = height;
+    }
+    ASSERT_LT(test.map.getCameraOptions({}).center->longitude(), -5.0);
+    EXPECT_LT(largestStep, mercatorMetre);
+
+    const vec3 dragged = test.eye();
+    test.map.setGestureInProgress(false);
+    for (int i = 0; i < 10; ++i) {
+        test.renderFrame();
+    }
+    const vec3 actual = test.eye();
+    for (int i = 0; i < 3; ++i) {
+        EXPECT_NEAR(actual[i], dragged[i], mercatorMetre) << "axis " << i;
+    }
+    EXPECT_NEAR(test.altitude(), westPlateauMeters, 5.0);
+}
+
+// The clamp waits for the finger to lift, as gl-js's does: the drag keeps the zoom and the height
+// it began at throughout, and the centre goes onto the ground along the line of sight once, keeping
+// the camera, when the gesture ends.
+TEST(TerrainCamera, DragKeepsItsZoomUntilTheFingerLifts) {
+    TerrainTransitionTest test;
+    ASSERT_TRUE(test.settleOnPlateau());
+    const double zoom = *test.map.getCameraOptions({}).zoom;
+
+    test.map.setGestureInProgress(true);
+    test.map.anchorCenterOnTerrain();
+    for (int i = 0; i < 30; ++i) {
+        test.map.moveBy({10.0, 0.0});
+        test.renderFrame();
+        ASSERT_NEAR(*test.map.getCameraOptions({}).zoom, zoom, 1e-12) << "frame " << i;
+        ASSERT_NEAR(test.altitude(), plateauMeters, 0.5) << "frame " << i;
+    }
+    ASSERT_LT(test.map.getCameraOptions({}).center->longitude(), -5.0);
+
+    const vec3 dragged = test.eye();
+    test.map.setGestureInProgress(false);
+    const vec3 lifted = test.eye();
+    for (int i = 0; i < 3; ++i) {
+        EXPECT_NEAR(lifted[i], dragged[i], mercatorMetre) << "axis " << i;
+    }
+    EXPECT_NEAR(test.altitude(), westPlateauMeters, 5.0);
+    EXPECT_GT(*test.map.getCameraOptions({}).zoom, zoom);
+}
+
+// A centre the app jumped to is still the one the clamp keeps when the heights under it change:
+// it is put on the new ground there, at the zoom it was given.
+TEST(TerrainCamera, HeightsChangingAfterAJumpKeepTheCentre) {
+    TerrainTransitionTest test;
+    ASSERT_TRUE(test.settleOnPlateau());
+    const LatLng target{47.2692, -30.0};
+    test.map.jumpTo(CameraOptions().withCenter(target).withZoom(2.5));
+    for (int i = 0; i < 20; ++i) {
+        test.renderFrame();
+    }
+    ASSERT_NEAR(test.altitude(), westPlateauMeters, 5.0);
+
+    test.map.getStyle().getTerrain()->setExaggeration(1.1f);
+    for (int i = 0; i < 20; ++i) {
+        test.renderFrame();
+    }
+
+    const auto camera = test.map.getCameraOptions({});
+    EXPECT_NEAR(*camera.centerAltitude, westPlateauMeters * 1.1, 5.0);
+    EXPECT_NEAR(*camera.zoom, 2.5, 1e-9);
+    EXPECT_NEAR(camera.center->latitude(), target.latitude(), 1e-9);
+    EXPECT_NEAR(camera.center->longitude(), target.longitude(), 1e-9);
+}
+
 // A transition cancelled short of its centre has no centre to keep either: the camera stays where
 // the cancel left it.
 TEST(TerrainCamera, ClampAfterACancelledTransitionKeepsTheCamera) {
@@ -824,6 +957,24 @@ TEST(TerrainCamera, ClampDoesNotApplyAfterTerrainRemoval) {
     ASSERT_TRUE(removedMidTransition);
 
     EXPECT_NEAR(test.altitude(), 0.0, 0.001);
+}
+
+// A style reload removes the terrain and adds it back over the same ground. Removal returns the
+// centre to sea level; the height under the centre the terrain then reports is the one it reported
+// before removal, and the clamp has to act on it all the same, or the centre stays at sea level
+// with the view dropped until the ground under it changes (Timberline, 370 pt).
+TEST(TerrainCamera, ClampPutsTheCentreBackOnTerrainThatReturns) {
+    TerrainTransitionTest test;
+    ASSERT_TRUE(test.settleOnPlateau());
+
+    test.map.getStyle().setTerrain(nullptr);
+    for (int i = 0; i < 10; ++i) {
+        test.renderFrame();
+    }
+    ASSERT_NEAR(test.altitude(), 0.0, 0.001);
+
+    test.map.getStyle().setTerrain(std::make_unique<style::Terrain>("dem", 1.0f));
+    EXPECT_TRUE(test.settleOnPlateau()) << "centre altitude " << test.altitude();
 }
 
 // A drape target is drawn into only by the source tiles that overlap its own tile, so the
