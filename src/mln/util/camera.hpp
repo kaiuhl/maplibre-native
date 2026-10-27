@@ -11,6 +11,10 @@ class LatLng;
 
 namespace util {
 
+/// `location` at `altitudeMeters` in mercator coordinates, the world one unit across, as the
+/// transform places the camera: the altitude in units at the location's own latitude.
+vec3 toMercator(const LatLng& location, double altitudeMeters) noexcept;
+
 class Camera {
 public:
     Camera() noexcept;

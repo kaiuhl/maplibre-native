@@ -11,6 +11,7 @@
 #include <mln/util/traits.hpp>
 #include <mln/util/action_journal.hpp>
 #include <mln/util/action_journal_impl.hpp>
+#include <mln/util/camera.hpp>
 #include <mln/gfx/rendering_stats.hpp>
 
 #include <cmath>
@@ -460,18 +461,13 @@ void Map::Impl::keepCameraAboveTerrain() {
     // the angle of the line between them off the vertical, and the zoom is the one that puts
     // the centre that far along it (gl-js's calculateCameraOptionsFromTo).
     //
-    // In world units, as the transform places the eye. A height in metres is a different number
-    // of them at the eye's latitude than at the centre's, kilometres away, and the eye's altitude
-    // is read at its own (FreeCameraOptions::getLocation): worked out in metres at the centre, the
-    // lift left an eye north of the centre short of the ground (1.6 m in the app), and lifted it
-    // again on every frame after without getting it there. A millimetre over the ground, so that
-    // rounding can't leave it under.
+    // In world units, as the transform places the eye, the ground's height in them at the eye's
+    // latitude rather than the centre's (FreeCameraOptions::getLocation reads it there). A
+    // millimetre over the ground, so that rounding can't leave it under.
     const double worldSize = Projection::worldSize(state.getScale());
     const double cameraToCenter = state.getCameraToCenterDistance();
     const double across = cameraToCenter * std::sin(state.getPitch()) / worldSize;
-    const double metresPerUnit = Projection::getMetersPerPixelAtLatitude(eye->location.latitude(), 0.0) *
-                                 Projection::worldSize(1.0);
-    const double rise = (*ground + 0.001) / metresPerUnit - state.getZ() / worldSize;
+    const double rise = util::toMercator(eye->location, *ground + 0.001)[2] - state.getZ() / worldSize;
     if (rise <= 0.0) {
         return; // looking up at the centre, past what a pitch below 90 degrees can show
     }
