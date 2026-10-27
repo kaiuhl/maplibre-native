@@ -35,6 +35,9 @@
 ### 🐞 Bug fixes
 
 - *...Add new stuff here...*
+- [core] Answer cache-only requests for a remote PMTiles archive from the ambient cache instead of the network, so tiles panned past no longer hold the network request slots the visible tiles need.
+- [core] Cancel a PMTiles request's archive fetches when the request is cancelled, and free them once it's answered, instead of keeping them for the life of the file source.
+- [core] Fix PMTiles tiles intermittently failing to load with `Error parsing PMTiles directory: map::at: key not found` after several requests loaded the same directory at once.
 - [core] Fix a crash in `RenderImageSource::update` when an image source's coordinates give an empty tile cover, such as an image wholly beyond the latitudes Web Mercator can show.
 - [OpenGL] Fix invisible raster layers on Adreno 3xx by avoiding an in-place alpha assignment in the fragment shader.
 - [core] Draw numbers and short uppercase codes upright in vertical CJK line labels ([#4565](https://github.com/maplibre/maplibre-native/issues/4565)), compat to [maplibre-gl-js#8205](https://github.com/maplibre/maplibre-gl-js/pull/8205).

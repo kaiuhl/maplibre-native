@@ -10,6 +10,9 @@
 
 ### 🐞 Bug fixes
 
+- Answer cache-only requests for a remote PMTiles archive from the ambient cache instead of the network, so tiles panned past no longer hold the network request slots the visible tiles need.
+- Cancel a PMTiles request's archive fetches when the request is cancelled, and free them once it's answered, instead of keeping them for the life of the file source.
+- Fix PMTiles tiles intermittently failing to load with `Error parsing PMTiles directory: map::at: key not found` after several requests loaded the same directory at once.
 - With 3D terrain, the Balanced terrain load mode draws terrain as far as Quality (64 tiles, not 48). The shorter reach left bare ground along the top edge of a steeply tilted map ([#XXXX](https://github.com/maplibre/maplibre-native/pull/XXXX)).
 - Hillshade layers shade each DEM tile once and reuse the result, instead of re-running the shading pass for every hillshade tile on every frame. A map with a hillshade layer draws about half as many passes per frame, which on an iPhone with 3D terrain was the difference between about 44 and 60 frames per second ([#XXXX](https://github.com/maplibre/maplibre-native/pull/XXXX)).
 - With 3D terrain, the ring of tiles added around the terrain's tile cover no longer overlaps tiles of another zoom in it. Overlapping tiles drew a coarse surface through the fine one at steep pitches, and draped custom layers drew a band where the two crossed ([#XXXX](https://github.com/maplibre/maplibre-native/pull/XXXX)).

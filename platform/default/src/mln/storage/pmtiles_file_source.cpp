@@ -1,5 +1,7 @@
 #include <sstream>
 #include <map>
+#include <memory>
+#include <vector>
 
 #include <mln/platform/settings.hpp>
 #include <mln/storage/file_source_manager.hpp>
@@ -45,6 +47,16 @@ bool acceptsURL(const std::string& url) {
 std::string extract_url(const std::string& url) {
     return url.substr(std::char_traits<char>::length(mln::util::PMTILES_PROTOCOL));
 }
+
+// How to load the parts of the archive that answer a request. A cache-only request reads only what
+// is available without the network: the ambient cache for a remote archive, and the file itself for
+// a local one, which the local file source reads whatever the loading method.
+mln::Resource::LoadingMethod archiveLoadingMethod(const mln::Resource& resource) {
+    if (resource.loadingMethod == mln::Resource::LoadingMethod::CacheOnly) {
+        return mln::Resource::LoadingMethod::CacheOnly;
+    }
+    return mln::Resource::LoadingMethod::All;
+}
 } // namespace
 
 // temporary, remove this when it's available in `pmtiles.hpp`
@@ -57,6 +69,8 @@ using namespace rapidjson;
 
 using AsyncCallback = std::function<void(std::unique_ptr<Response::Error>)>;
 using AsyncTileCallback = std::function<void(std::pair<uint64_t, uint32_t>, std::unique_ptr<Response::Error>)>;
+using DirectoryEntries = std::shared_ptr<const std::vector<pmtiles::entryv3>>;
+using AsyncDirectoryCallback = std::function<void(const DirectoryEntries&, std::unique_ptr<Response::Error>)>;
 
 class PMTilesFileSource::Impl {
 public:
@@ -68,7 +82,7 @@ public:
     void request_tilejson(AsyncRequest* req, const Resource& resource, const ActorRef<FileSourceRequest>& ref) {
         auto url = extract_url(resource.url);
 
-        getMetadata(url, req, [=, this](std::unique_ptr<Response::Error> error) {
+        getMetadata(url, req, archiveLoadingMethod(resource), [=, this](std::unique_ptr<Response::Error> error) {
             Response response;
 
             if (error) {
@@ -85,8 +99,9 @@ public:
     // Load data for specific tile
     void request_tile(AsyncRequest* req, const Resource& resource, ActorRef<FileSourceRequest> ref) {
         auto url = extract_url(resource.url);
+        const auto loadingMethod = archiveLoadingMethod(resource);
 
-        getHeader(url, req, [=, this](std::unique_ptr<Response::Error> error) {
+        getHeader(url, req, loadingMethod, [=, this](std::unique_ptr<Response::Error> error) {
             if (error) {
                 Response response;
                 response.noContent = true;
@@ -122,6 +137,7 @@ public:
             getTileAddress(
                 url,
                 req,
+                loadingMethod,
                 tileID,
                 header.root_dir_offset,
                 static_cast<std::uint32_t>(header.root_dir_bytes),
@@ -143,7 +159,7 @@ public:
                     }
 
                     Resource tileResource(Resource::Kind::Source, url);
-                    tileResource.loadingMethod = Resource::LoadingMethod::All;
+                    tileResource.loadingMethod = loadingMethod;
                     tileResource.dataRange = std::make_pair(tileAddress.first,
                                                             tileAddress.first + tileAddress.second - 1);
 
@@ -218,6 +234,9 @@ public:
         return clientOptions.clone();
     }
 
+    // Cancels the archive fetch the request is waiting for, if any, which ends its lookup.
+    void cancel(AsyncRequest* req) { tasks.erase(req); }
+
 private:
     mutable std::mutex resourceOptionsMutex;
     mutable std::mutex clientOptionsMutex;
@@ -227,7 +246,8 @@ private:
     std::shared_ptr<FileSource> fileSource;
     std::map<std::string, pmtiles::headerv3> header_cache;
     std::map<std::string, std::string> metadata_cache;
-    std::map<std::string, std::map<std::string, std::vector<pmtiles::entryv3>>> directory_cache;
+    std::map<std::string, std::map<std::string, DirectoryEntries>> directory_cache;
+    // Cache keys by archive, least recently used first. Each key appears once.
     std::map<std::string, std::vector<std::string>> directory_cache_control;
     std::map<AsyncRequest*, std::unique_ptr<AsyncRequest>> tasks;
 
@@ -240,14 +260,17 @@ private:
         return fileSource;
     }
 
-    void getHeader(const std::string& url, AsyncRequest* req, AsyncCallback callback) {
+    void getHeader(const std::string& url,
+                   AsyncRequest* req,
+                   Resource::LoadingMethod loadingMethod,
+                   AsyncCallback callback) {
         if (header_cache.contains(url)) {
             callback(std::unique_ptr<Response::Error>());
             return;
         }
 
         Resource resource(Resource::Kind::Source, url);
-        resource.loadingMethod = Resource::LoadingMethod::All;
+        resource.loadingMethod = loadingMethod;
 
         resource.dataRange = std::make_pair<uint64_t, uint64_t>(pmtilesHeaderOffset,
                                                                 pmtilesHeaderOffset + pmtilesHeaderLength - 1);
@@ -302,7 +325,10 @@ private:
             });
     }
 
-    void getMetadata(std::string& url, AsyncRequest* req, AsyncCallback callback) {
+    void getMetadata(std::string& url,
+                     AsyncRequest* req,
+                     Resource::LoadingMethod loadingMethod,
+                     AsyncCallback callback) {
         if (metadata_cache.contains(url)) {
             callback(std::unique_ptr<Response::Error>());
             return;
@@ -311,6 +337,7 @@ private:
         getHeader(
             url,
             req,
+            loadingMethod,
             [=, this](std::unique_ptr<Response::Error> error) { // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
                 if (error) {
                     callback(std::move(error));
@@ -420,7 +447,7 @@ private:
 
                 if (header.json_metadata_bytes > 0) {
                     Resource resource(Resource::Kind::Source, url);
-                    resource.loadingMethod = Resource::LoadingMethod::All;
+                    resource.loadingMethod = loadingMethod;
                     resource.dataRange = std::make_pair(header.json_metadata_offset,
                                                         header.json_metadata_offset + header.json_metadata_bytes - 1);
 
@@ -470,68 +497,76 @@ private:
             });
     }
 
-    void storeDirectory(const std::string& url,
-                        uint64_t directoryOffset,
-                        uint64_t directoryLength,
-                        const std::string& directoryData) {
-        if (!directory_cache.contains(url)) {
-            directory_cache.emplace(url, std::map<std::string, std::vector<pmtiles::entryv3>>());
-            directory_cache_control.emplace(url, std::vector<std::string>());
+    DirectoryEntries findDirectory(const std::string& url, const std::string& directory_cache_key) const {
+        const auto archive = directory_cache.find(url);
+        if (archive == directory_cache.end()) {
+            return nullptr;
         }
 
-        std::string directory_cache_key = url + "|" + std::to_string(directoryOffset) + "|" +
-                                          std::to_string(directoryLength);
-        directory_cache.at(url).emplace(directory_cache_key, pmtiles::deserialize_directory(directoryData));
-        directory_cache_control.at(url).emplace_back(directory_cache_key);
+        const auto directory = archive->second.find(directory_cache_key);
+        return directory == archive->second.end() ? nullptr : directory->second;
+    }
 
-        if (directory_cache_control.at(url).size() > MAX_DIRECTORY_CACHE_ENTRIES) {
-            directory_cache.at(url).erase(directory_cache_control.at(url).front());
-            directory_cache_control.at(url).erase(directory_cache_control.at(url).begin());
+    // Makes a cached directory the most recently used, then evicts the least recently used ones over
+    // the limit. Concurrent requests can each load and store the same directory, so its key moves to
+    // the back instead of being listed again: a stale listing would evict the directory while it's
+    // still in use, even straight after storing it.
+    void touchDirectory(const std::string& url, const std::string& directory_cache_key) {
+        auto& control = directory_cache_control[url];
+        std::erase(control, directory_cache_key);
+        control.push_back(directory_cache_key);
+
+        while (control.size() > MAX_DIRECTORY_CACHE_ENTRIES) {
+            directory_cache[url].erase(control.front());
+            control.erase(control.begin());
         }
     }
 
+    DirectoryEntries storeDirectory(const std::string& url,
+                                    const std::string& directory_cache_key,
+                                    const std::string& directoryData) {
+        auto directory = std::make_shared<const std::vector<pmtiles::entryv3>>(
+            pmtiles::deserialize_directory(directoryData));
+        directory_cache[url].insert_or_assign(directory_cache_key, directory);
+        touchDirectory(url, directory_cache_key);
+        return directory;
+    }
+
+    // Answers with the directory itself, so the caller never has to find it in the cache, from which
+    // it may have been evicted.
     void getDirectory(const std::string& url,
                       AsyncRequest* req,
+                      Resource::LoadingMethod loadingMethod,
                       uint64_t directoryOffset,
                       uint32_t directoryLength,
-                      AsyncCallback callback) {
+                      AsyncDirectoryCallback callback) {
         std::string directory_cache_key = url + "|" + std::to_string(directoryOffset) + "|" +
                                           std::to_string(directoryLength);
 
-        if (directory_cache.contains(url) && directory_cache.at(url).contains(directory_cache_key)) {
-            if (directory_cache_control.at(url).back() != directory_cache_key) {
-                directory_cache_control.at(url).emplace_back(directory_cache_key);
-
-                for (auto it = directory_cache_control.at(url).begin(); it != directory_cache_control.at(url).end();
-                     ++it) {
-                    if (*it == directory_cache_key) {
-                        directory_cache_control.at(url).erase(it);
-                        break;
-                    }
-                }
-            }
-
-            callback(std::unique_ptr<Response::Error>());
+        if (DirectoryEntries directory = findDirectory(url, directory_cache_key)) {
+            touchDirectory(url, directory_cache_key);
+            callback(directory, {});
             return;
         }
 
-        getHeader(url, req, [=, this](std::unique_ptr<Response::Error> error) {
+        getHeader(url, req, loadingMethod, [=, this](std::unique_ptr<Response::Error> error) {
             if (error) {
-                callback(std::move(error));
+                callback(nullptr, std::move(error));
                 return;
             }
 
             pmtiles::headerv3 header = header_cache.at(url);
 
             Resource resource(Resource::Kind::Source, url);
-            resource.loadingMethod = Resource::LoadingMethod::All;
+            resource.loadingMethod = loadingMethod;
             resource.dataRange = std::make_pair(directoryOffset, directoryOffset + directoryLength - 1);
 
             tasks[req] = getFileSource()->request(resource, [=, this](const Response& response) {
                 if (response.error) {
-                    callback(std::make_unique<Response::Error>(
-                        response.error->reason,
-                        std::string("Error fetching PMTiles directory: ") + response.error->message));
+                    callback(nullptr,
+                             std::make_unique<Response::Error>(
+                                 response.error->reason,
+                                 std::string("Error fetching PMTiles directory: ") + response.error->message));
 
                     return;
                 }
@@ -541,10 +576,13 @@ private:
                 }
 
                 if (!response.data) {
-                    callback(std::make_unique<Response::Error>(Response::Error::Reason::Other,
+                    callback(nullptr,
+                             std::make_unique<Response::Error>(Response::Error::Reason::Other,
                                                                "PMTiles directory response has no data"));
                     return;
                 }
+
+                DirectoryEntries directory;
 
                 try {
                     std::string directoryData = *response.data;
@@ -553,20 +591,25 @@ private:
                         directoryData = util::decompress(directoryData);
                     }
 
-                    storeDirectory(url, directoryOffset, directoryLength, directoryData);
-
-                    callback(std::unique_ptr<Response::Error>());
+                    directory = storeDirectory(url, directory_cache_key, directoryData);
                 } catch (const std::exception& e) {
-                    callback(std::make_unique<Response::Error>(
-                        Response::Error::Reason::Other,
-                        std::string(std::string("Error parsing PMTiles directory: ") + e.what())));
+                    callback(nullptr,
+                             std::make_unique<Response::Error>(
+                                 Response::Error::Reason::Other,
+                                 std::string(std::string("Error parsing PMTiles directory: ") + e.what())));
+                    return;
                 }
+
+                // Outside the try: an exception further along the lookup isn't a parse error, and catching
+                // it here would answer the caller a second time.
+                callback(directory, {});
             });
         });
     }
 
     void getTileAddress(const std::string& url,
                         AsyncRequest* req,
+                        Resource::LoadingMethod loadingMethod,
                         uint64_t tileID,
                         uint64_t directoryOffset,
                         uint32_t directoryLength,
@@ -584,19 +627,18 @@ private:
         getDirectory(
             url,
             req,
+            loadingMethod,
             directoryOffset,
             directoryLength,
-            [=, this](std::unique_ptr<Response::Error> error) { // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
+            [=, this](const DirectoryEntries& directory,
+                      std::unique_ptr<Response::Error> error) { // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
                 if (error) {
                     callback(std::make_pair(0, 0), std::move(error));
                     return;
                 }
 
                 pmtiles::headerv3 header = header_cache.at(url);
-                std::vector<pmtiles::entryv3> directory = directory_cache.at(url).at(
-                    url + "|" + std::to_string(directoryOffset) + "|" + std::to_string(directoryLength));
-
-                pmtiles::entryv3 entry = pmtiles::find_tile(directory, tileID);
+                pmtiles::entryv3 entry = pmtiles::find_tile(*directory, tileID);
 
                 if (entry.length > 0) {
                     if (entry.run_length > 0) {
@@ -606,6 +648,7 @@ private:
 
                     getTileAddress(url,
                                    req,
+                                   loadingMethod,
                                    tileID,
                                    header.leaf_dirs_offset + entry.offset,
                                    entry.length,
@@ -636,6 +679,9 @@ PMTilesFileSource::PMTilesFileSource(const ResourceOptions& resourceOptions, con
 
 std::unique_ptr<AsyncRequest> PMTilesFileSource::request(const Resource& resource, FileSource::Callback callback) {
     auto req = std::make_unique<FileSourceRequest>(std::move(callback));
+
+    req->onCancel(
+        [actorRef = thread->actor(), asyncRequest = req.get()]() { actorRef.invoke(&Impl::cancel, asyncRequest); });
 
     // assume if there is a tile request, that the pmtiles file has been validated
     if (resource.kind == Resource::Tile) {
