@@ -3,10 +3,15 @@
 #include <mln/map/camera.hpp>
 #include <mln/map/mode.hpp>
 #include <mln/map/transform.hpp>
+#include <mln/math/angles.hpp>
 #include <mln/renderer/render_terrain.hpp>
+#include <mln/renderer/terrain_elevation_index.hpp>
 #include <mln/tile/tile_id.hpp>
+#include <mln/util/projection.hpp>
 #include <mln/util/tile_cover.hpp>
 
+#include <algorithm>
+#include <cmath>
 #include <set>
 #include <utility>
 #include <vector>
@@ -45,27 +50,37 @@ std::array<double, 2> cameraGround(const Transform& transform) {
     return {{position[0], position[1]}};
 }
 
-UnwrappedTileID z10At(double x, double y) {
-    return UnwrappedTileID(0, CanonicalTileID(10, static_cast<uint32_t>(x * 1024), static_cast<uint32_t>(y * 1024)));
+UnwrappedTileID z1(uint32_t x, uint32_t y) {
+    return UnwrappedTileID(0, CanonicalTileID(1, x, y));
+}
+
+UnwrappedTileID z10(uint32_t x, uint32_t y) {
+    return UnwrappedTileID(0, CanonicalTileID(10, x, y));
 }
 } // namespace
 
-TEST(TerrainMeshCover, CapKeepsTheTilesNearestTheOrigin) {
-    const std::set<UnwrappedTileID> middle{z2(1, 1), z2(2, 1), z2(1, 2), z2(2, 2)};
-    EXPECT_EQ(middle, RenderTerrain::nearestMeshTiles(wholeZ2(), 4, worldCentre));
+// Capped, the cover keeps the whole world: the z2 tiles farthest out for their size give way to their
+// z1 parents, rather than the cover being cut down to its middle four.
+TEST(TerrainMeshCover, CapCoarsensTheFarthestTilesInsteadOfDroppingThem) {
+    const std::set<UnwrappedTileID> wholeZ1{z1(0, 0), z1(1, 0), z1(0, 1), z1(1, 1)};
+    EXPECT_EQ(wholeZ1, RenderTerrain::capMeshCover(wholeZ2(), 4, worldCentre));
 }
 
 TEST(TerrainMeshCover, CapBreaksTiesByTileID) {
-    // Past the middle four, the eight edge tiles beside them lie equally far from the centre;
-    // the two with the lowest IDs stay, so the same view always keeps the same tiles.
-    const std::set<UnwrappedTileID> expected{z2(1, 1), z2(2, 1), z2(1, 2), z2(2, 2), z2(0, 1), z2(0, 2)};
-    EXPECT_EQ(expected, RenderTerrain::nearestMeshTiles(wholeZ2(), 6, worldCentre));
+    // The four corner tiles lie as far out as each other; the one with the lowest ID gives way to
+    // its parent first, so the same view always keeps the same tiles.
+    std::set<UnwrappedTileID> expected = wholeZ2();
+    for (const auto& id : {z2(0, 0), z2(1, 0), z2(0, 1), z2(1, 1)}) {
+        expected.erase(id);
+    }
+    expected.insert(z1(0, 0));
+    EXPECT_EQ(expected, RenderTerrain::capMeshCover(wholeZ2(), 13, worldCentre));
 }
 
 TEST(TerrainMeshCover, NoCapOrRoomToSpareKeepsEveryTile) {
-    EXPECT_EQ(wholeZ2(), RenderTerrain::nearestMeshTiles(wholeZ2(), 0, worldCentre));
-    EXPECT_EQ(wholeZ2(), RenderTerrain::nearestMeshTiles(wholeZ2(), 16, worldCentre));
-    EXPECT_EQ(wholeZ2(), RenderTerrain::nearestMeshTiles(wholeZ2(), 64, worldCentre));
+    EXPECT_EQ(wholeZ2(), RenderTerrain::capMeshCover(wholeZ2(), 0, worldCentre));
+    EXPECT_EQ(wholeZ2(), RenderTerrain::capMeshCover(wholeZ2(), 16, worldCentre));
+    EXPECT_EQ(wholeZ2(), RenderTerrain::capMeshCover(wholeZ2(), 64, worldCentre));
 }
 
 TEST(TerrainMeshCover, CapOriginWithoutTiltIsTheMapCentre) {
@@ -91,20 +106,45 @@ TEST(TerrainMeshCover, CapOriginIsTheGroundUnderATiltedCamera) {
     }
 }
 
-TEST(TerrainMeshCover, CapKeepsTheTileUnderATiltedCamera) {
-    // Facing north at a 60° tilt, the camera stands south of the centre. Of two tiles as far
-    // from the centre, one under the camera and one as far ahead of the centre, the cap keeps
-    // the one under the camera: the biggest on screen, where the other is near the horizon.
-    Transform transform;
-    look(transform, 60.0, 0.0);
-    const auto origin = RenderTerrain::meshTileCapOrigin(transform.getState());
-    const double behind = origin[1] - 0.5;
-    ASSERT_GT(behind, 1.0 / 1024) << "the camera should stand more than a z10 tile behind the centre";
+TEST(TerrainMeshCover, CapKeepsTheGroundUnderATiltedCameraAtItsZoom) {
+    // Facing north tilted, the camera stands south of the map centre (its ground is the cap's
+    // origin, CapOriginIsTheGroundUnderATiltedCamera), here 3 z10 tiles south. Of a block of z10
+    // tiles under the camera and one 2 tiles ahead of the centre, capped to five tiles, the block
+    // ahead becomes its z9 parent and the one under the camera, the biggest on screen, keeps its
+    // zoom. Measured from the centre, the block under the camera is the farther one.
+    const std::array<double, 2> camera{{0.75, 0.5 + 3.0 / 1024}};
+    const auto block = [](double x, double y) {
+        const auto tx = static_cast<uint32_t>(x * 1024) & ~1u;
+        const auto ty = static_cast<uint32_t>(y * 1024) & ~1u;
+        return std::set<UnwrappedTileID>{z10(tx, ty), z10(tx + 1, ty), z10(tx, ty + 1), z10(tx + 1, ty + 1)};
+    };
+    const auto underTheCamera = block(camera[0], camera[1]);
+    const auto ahead = block(0.75, 0.5 - 2.0 / 1024);
+    std::set<UnwrappedTileID> cover = underTheCamera;
+    cover.insert(ahead.begin(), ahead.end());
+    ASSERT_EQ(8u, cover.size());
 
-    const UnwrappedTileID underTheCamera = z10At(0.75, 0.5 + behind);
-    const UnwrappedTileID ahead = z10At(0.75, 0.5 - behind);
-    const std::set<UnwrappedTileID> kept = RenderTerrain::nearestMeshTiles({underTheCamera, ahead}, 1, origin);
-    EXPECT_EQ(std::set<UnwrappedTileID>{underTheCamera}, kept);
+    std::set<UnwrappedTileID> expected = underTheCamera;
+    expected.emplace(0, ahead.begin()->canonical.scaledTo(9));
+    EXPECT_EQ(expected, RenderTerrain::capMeshCover(cover, 5, camera));
+
+    std::set<UnwrappedTileID> fromTheCentre = ahead;
+    fromTheCentre.emplace(0, underTheCamera.begin()->canonical.scaledTo(9));
+    EXPECT_EQ(fromTheCentre, RenderTerrain::capMeshCover(cover, 5, {{0.75, 0.5}}));
+}
+
+// The DEM source loads the own DEM tile of every mesh tile coarser than its maxzoom (z15 here),
+// keyed as the source keys its tiles below the maxzoom; a tile at or past it binds a maxzoom tile
+// the source's cover holds.
+TEST(TerrainMeshCover, CoarseMeshTilesAskForTheirOwnDEMTiles) {
+    const std::set<UnwrappedTileID> cover{UnwrappedTileID(0, CanonicalTileID(13, 1308, 2930)),
+                                          UnwrappedTileID(1, CanonicalTileID(14, 2618, 5862)),
+                                          UnwrappedTileID(0, CanonicalTileID(15, 5236, 11722)),
+                                          UnwrappedTileID(0, CanonicalTileID(17, 20945, 46889))};
+    const std::vector<OverscaledTileID> expected{OverscaledTileID(13, 0, CanonicalTileID(13, 1308, 2930)),
+                                                 OverscaledTileID(14, 1, CanonicalTileID(14, 2618, 5862))};
+    EXPECT_EQ(expected, RenderTerrain::coarseMeshDEMTiles(cover, 15));
+    EXPECT_TRUE(RenderTerrain::coarseMeshDEMTiles(cover, 13).empty());
 }
 
 TEST(TerrainMeshCover, DilationAddsTheRingAroundOneTile) {
@@ -339,4 +379,112 @@ TEST(TerrainMeshCover, PhoneOverzoomFollowsTheLodShift) {
     for (const double pitch : {0.0, 54.0}) {
         EXPECT_EQ((std::vector<uint8_t>{16, 16}), phoneCoverMaxZooms(15.0, pitch, 1.0)) << "pitch " << pitch;
     }
+}
+
+namespace {
+
+// A summit shaped like Mt Hood's: 3429 m at the top, falling away with distance the way Hood's
+// flanks do (2664 m 600 m out, the 8737 ft of Pulpit Rock in the report; 1800 m at 3.5 km; 1270 m
+// at 10 km; 980 m at 20 km).
+struct Summit {
+    LatLng peak{45.3736, -121.6959};
+
+    double operator()(const LatLng& p) const {
+        const double north = (p.latitude() - peak.latitude()) * 110540.0;
+        const double east = (p.longitude() - peak.longitude()) * 111320.0 * std::cos(util::deg2rad(peak.latitude()));
+        return 300.0 + 3129.0 / (1.0 + std::pow(std::hypot(north, east) / 3105.0, 0.686));
+    }
+};
+
+// The summit's heights as the DEM source would report them: each tile's lowest and highest point
+class SummitElevation : public util::TileElevationProvider {
+public:
+    Summit summit;
+
+    std::optional<Range<double>> getTileElevationRange(const CanonicalTileID& id) const override {
+        const double tiles = std::exp2(id.z);
+        const auto lon = [&](double x) {
+            return x / tiles * 360.0 - 180.0;
+        };
+        const auto lat = [&](double y) {
+            return util::rad2deg(std::atan(std::sinh(M_PI * (1.0 - 2.0 * y / tiles))));
+        };
+        const double west = lon(id.x), east = lon(id.x + 1.0), north = lat(id.y), south = lat(id.y + 1.0);
+        // Heights fall away from the peak: highest at the tile's point nearest it, lowest at a corner
+        const LatLng nearest{std::clamp(summit.peak.latitude(), south, north),
+                             std::clamp(summit.peak.longitude(), west, east)};
+        double lowest = summit(nearest);
+        for (const auto& corner :
+             {LatLng{north, west}, LatLng{north, east}, LatLng{south, west}, LatLng{south, east}}) {
+            lowest = std::min(lowest, summit(corner));
+        }
+        return Range<double>{lowest, summit(nearest)};
+    }
+};
+
+bool coverHoldsLatLng(const std::set<UnwrappedTileID>& cover, const LatLng& latLng) {
+    return std::ranges::any_of(cover, [&](const UnwrappedTileID& tile) {
+        const auto point = Projection::project(latLng, tile.canonical.z);
+        return tile.wrap == 0 && std::floor(point.x) == tile.canonical.x && std::floor(point.y) == tile.canonical.y;
+    });
+}
+
+} // namespace
+
+// At z17 on a summit, tilted to the app's cap, a phone looks kilometres down the mountain: every
+// row of the screen is ground, as far as 4.8 km off at the top edge (7.3 km at 60 deg). The mesh
+// cover has to hold the ground under every pixel within the load mode's tile budget. Before, it
+// kept one zoom for the whole view (no LOD below a 60 deg tilt), 115 z17 tiles at the app's cap,
+// and the cap kept the 64 nearest the camera: the ground under the top ~50 rows was left out.
+TEST(TerrainMeshCover, SummitViewCoversTheGroundUnderEveryPixel) {
+    const LatLng pulpitRock{45.3790, -121.6960};
+    // The app's tilt cap on an 874 pt view is 56.6 deg (TerrainTilt: 90 - 15 - the 18.4 deg the
+    // view looks above its centre); 54 the cap of Kyle's earlier phones; 60 the app's ceiling.
+    for (const double pitch : {54.0, 56.57, 60.0}) {
+        for (const auto mode : {TerrainLoadMode::Balanced, TerrainLoadMode::Performance}) {
+            SummitElevation elevation;
+            Transform transform;
+            transform.resize({402, 874});
+            transform.jumpTo(CameraOptions()
+                                 .withCenter(pulpitRock)
+                                 .withZoom(17.0)
+                                 .withPitch(pitch)
+                                 .withBearing(116.0)
+                                 .withCenterAltitude(elevation.summit(pulpitRock)));
+            const auto& state = transform.getState();
+            // The app's LOD settings: the default mode, which the terrain covers with as gl-js does
+            const util::TileCoverParameters params{.transformState = state, .elevationProvider = &elevation};
+            const size_t budget = terrainLoadBudget(mode).maxMeshTiles;
+            const auto cover = RenderTerrain::meshCover(params, 17.0, 256, 15, budget);
+            const std::string name = "pitch " + std::to_string(pitch) +
+                                     (mode == TerrainLoadMode::Balanced ? ", Balanced" : ", Performance");
+            EXPECT_LE(cover.size(), budget) << name;
+            EXPECT_EQ(17, *coverZooms(cover).rbegin()) << name << ": the near field stays at the view's zoom";
+
+            int uncovered = 0;
+            int lowestUncoveredRow = -1;
+            for (int y = 0; y < 874; y += 8) {
+                for (const double x : {0.0, 100.0, 201.0, 300.0, 401.0}) {
+                    const auto ground = pickTerrainSurface(
+                        state,
+                        {x, static_cast<double>(y)},
+                        [&](const LatLng& p) { return std::optional<double>(elevation.summit(p)); },
+                        3430.0);
+                    ASSERT_TRUE(ground) << name << ": every pixel of the view looks at the summit's ground";
+                    if (!coverHoldsLatLng(cover, *ground)) {
+                        ++uncovered;
+                        lowestUncoveredRow = y;
+                    }
+                }
+            }
+            EXPECT_EQ(0, uncovered) << name << ": ground left out of the cover down to row " << lowestUncoveredRow;
+        }
+    }
+}
+
+// The terrain covers with maplibre-gl-js's per-tile zoom unless the map chose a variable zoom itself.
+TEST(TerrainMeshCover, TerrainCoversWithTheGLJSTileZoomByDefault) {
+    EXPECT_EQ(TileLodMode::Adaptive, RenderTerrain::coverLodMode(TileLodMode::Default));
+    EXPECT_EQ(TileLodMode::Adaptive, RenderTerrain::coverLodMode(TileLodMode::Adaptive));
+    EXPECT_EQ(TileLodMode::Distance, RenderTerrain::coverLodMode(TileLodMode::Distance));
 }

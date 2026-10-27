@@ -278,13 +278,23 @@ void TilePyramid::update(const std::vector<Immutable<style::LayerProperties>>& l
     // loading as an optional stand-in for its own tiles below it, which cancelled the request every
     // frame. Not through updateRenderables, which would hold the ancestors of one still loading as
     // optional the same way, before the cover could require them.
-    for (const auto& id : destinationTiles) {
+    // The terrain mesh's coarse DEM tiles (TileParameters::terrainMeshTiles) are held the same
+    // way: the mesh binds them, nothing renders them.
+    const auto holdUnrendered = [&](const OverscaledTileID& id) {
         Tile* tile = getTileFn(id);
         if (!tile) {
             tile = createTileFn(id);
         }
         if (tile) {
             retainTileFn(*tile, TileNecessity::Required);
+        }
+    };
+    for (const auto& id : destinationTiles) {
+        holdUnrendered(id);
+    }
+    for (const auto& id : parameters.terrainMeshTiles) {
+        if (id.canonical.z >= zoomRange.min && id.canonical.z <= zoomRange.max) {
+            holdUnrendered(id);
         }
     }
 

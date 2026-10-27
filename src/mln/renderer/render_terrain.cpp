@@ -198,9 +198,8 @@ std::set<UnwrappedTileID> RenderTerrain::dilateMeshCover(const std::set<Unwrappe
 
 std::set<UnwrappedTileID> RenderTerrain::computeMeshCover(
     const TransformState& state, const std::shared_ptr<UpdateParameters>& updateParameters) const {
-    std::set<UnwrappedTileID> out;
     if (!demSource) {
-        return out;
+        return {};
     }
 
     // Elevation-aware visibility: terrain leaning towards the camera occupies
@@ -215,21 +214,32 @@ std::set<UnwrappedTileID> RenderTerrain::computeMeshCover(
     // elevation-aware ideal cover from the view, not the DEM's loaded tile set.
     const uint16_t terrainCoverTileSize = demSource->getTileSize();
 
-    // LOD parameters from the frame drive the same near-high/far-low zoom
-    // selection every other source uses, so the near field drapes at a higher
+    // LOD parameters from the frame drive the near-high/far-low zoom selection (meshCover takes
+    // the terrain's own LOD from the map's, coverLodMode), so the near field drapes at a higher
     // zoom (smaller ground area per 1024 target = sharper draped content).
     util::TileCoverParameters coverParams{.transformState = state, .elevationProvider = &elevationProvider};
     double zoomShift = 0.0;
+    size_t maxTiles = 0;
     if (updateParameters) {
         coverParams.tileLodMinRadius = updateParameters->tileLodMinRadius;
         coverParams.tileLodScale = updateParameters->tileLodScale;
         coverParams.tileLodPitchThreshold = updateParameters->tileLodPitchThreshold;
         coverParams.tileLodMode = updateParameters->tileLodMode;
         zoomShift = updateParameters->tileLodZoomShift;
+        maxTiles = terrainLoadBudget(updateParameters->terrainLoadMode).maxMeshTiles;
     }
 
     const double zoom = util::clamp<double>(state.getZoom() + zoomShift, state.getMinZoom(), state.getMaxZoom());
-    out = idealMeshCover(coverParams, zoom, terrainCoverTileSize, demSource->getMaxZoom());
+    return meshCover(coverParams, zoom, terrainCoverTileSize, demSource->getMaxZoom(), maxTiles);
+}
+
+std::set<UnwrappedTileID> RenderTerrain::meshCover(util::TileCoverParameters coverParams,
+                                                   double zoom,
+                                                   uint16_t tileSize,
+                                                   uint8_t demMaxZoom,
+                                                   size_t maxTiles) {
+    coverParams.tileLodMode = coverLodMode(coverParams.tileLodMode);
+    std::set<UnwrappedTileID> out = idealMeshCover(coverParams, zoom, tileSize, demMaxZoom);
     if (out.empty()) {
         return out;
     }
@@ -251,21 +261,15 @@ std::set<UnwrappedTileID> RenderTerrain::computeMeshCover(
         out = util::frustumCull(coverParams, dilated);
     }
 
-    // Cap the tile count: keep those nearest the camera, drop the farthest (the horizon tiles a
-    // high tilt pulls in). Nearest the camera, not the map centre: at a steep tilt the centre is
-    // far ahead, and the tiles right under the camera - the bottom corners of the screen, the
-    // biggest on it - would rank as far and be dropped, showing the skirts of the tiles behind
-    // them as streaks. Per-mode cap (TerrainLoadBudget::maxMeshTiles): Quality keeps
-    // a generous cap so terrain render distance stays long; Balanced/Performance trade distance
-    // for frame time. It caps the cover, not just the mesh: the drape-target pool allocates a
-    // 1024 px target per cover tile, so a cap on the mesh alone still allocated one for every
-    // tile it dropped.
-    if (updateParameters) {
-        out = nearestMeshTiles(std::move(out),
-                               terrainLoadBudget(updateParameters->terrainLoadMode).maxMeshTiles,
-                               meshTileCapOrigin(state));
-    }
-    return out;
+    // Cap the tile count (TerrainLoadBudget::maxMeshTiles) by coarsening the tiles farthest from
+    // the camera, for their size, into their parents: the far ground is drawn coarser, never
+    // left out. Dropping the farthest tiles left their ground as bare background: at z17 on Mt
+    // Hood tilted to the app's cap, everything past the 64 z17 tiles nearest the camera, the
+    // upper part of the screen. Measured from the camera, not the map centre: at a steep tilt
+    // the centre is far ahead, and the tiles right under the camera - the bottom corners of the
+    // screen, the biggest on it - would rank as far. It caps the cover, not just the mesh: the
+    // drape-target pool allocates a 1024 px target per cover tile.
+    return capMeshCover(std::move(out), maxTiles, meshTileCapOrigin(coverParams.transformState));
 }
 
 std::set<UnwrappedTileID> RenderTerrain::idealMeshCover(const util::TileCoverParameters& coverParams,
@@ -328,32 +332,54 @@ std::array<double, 2> RenderTerrain::meshTileCapOrigin(const TransformState& sta
             0.5 - std::log(std::tan(M_PI / 4.0 + latRad / 2.0)) / (2.0 * M_PI) + back * std::cos(compass)};
 }
 
-std::set<UnwrappedTileID> RenderTerrain::nearestMeshTiles(std::set<UnwrappedTileID> tiles,
-                                                          size_t maxTiles,
-                                                          const std::array<double, 2>& origin) {
-    if (maxTiles == 0 || tiles.size() <= maxTiles) {
+std::set<UnwrappedTileID> RenderTerrain::capMeshCover(std::set<UnwrappedTileID> tiles,
+                                                      size_t maxTiles,
+                                                      const std::array<double, 2>& origin) {
+    if (maxTiles == 0) {
         return tiles;
     }
-    const auto tileDist2 = [&](const UnwrappedTileID& id) {
-        const double scale = static_cast<double>(1u << id.canonical.z);
-        const double tx = (static_cast<double>(id.canonical.x) + 0.5) / scale + id.wrap;
-        const double ty = (static_cast<double>(id.canonical.y) + 0.5) / scale;
-        const double dx = tx - origin[0];
-        const double dy = ty - origin[1];
-        return dx * dx + dy * dy;
+    // How many of its own widths the tile's centre is from the origin: the larger, the smaller
+    // the tile shows on screen for the detail it holds
+    const auto widthsAway = [&](const UnwrappedTileID& id) {
+        const double scale = std::exp2(static_cast<double>(id.canonical.z));
+        const double dx = (static_cast<double>(id.canonical.x) + 0.5) / scale + id.wrap - origin[0];
+        const double dy = (static_cast<double>(id.canonical.y) + 0.5) / scale - origin[1];
+        return std::hypot(dx, dy) * scale;
     };
+    while (tiles.size() > maxTiles) {
+        // Ties go by tile ID, so the same view keeps the same tiles from one call to the next.
+        const auto coarsest = std::max_element(
+            tiles.begin(), tiles.end(), [&](const UnwrappedTileID& a, const UnwrappedTileID& b) {
+                const double wa = widthsAway(a);
+                const double wb = widthsAway(b);
+                return wa < wb || (wa == wb && b < a);
+            });
+        if (coarsest->canonical.z == 0) {
+            tiles.erase(coarsest); // a whole world copy has no parent
+            continue;
+        }
+        // The parent replaces every tile inside it (none of the cover's tiles overlap, so none
+        // holds it). Each step takes a tile up a zoom or the count down, so this ends.
+        const UnwrappedTileID parent(coarsest->wrap, coarsest->canonical.scaledTo(coarsest->canonical.z - 1));
+        std::erase_if(tiles, [&](const UnwrappedTileID& id) { return id.isChildOf(parent); });
+        tiles.insert(parent);
+    }
+    return tiles;
+}
 
-    // Ties go by tile ID, so the same view keeps the same tiles from one call to the next.
-    std::vector<UnwrappedTileID> sorted(tiles.begin(), tiles.end());
-    std::partial_sort(sorted.begin(),
-                      sorted.begin() + static_cast<std::ptrdiff_t>(maxTiles),
-                      sorted.end(),
-                      [&](const UnwrappedTileID& a, const UnwrappedTileID& b) {
-                          const double da = tileDist2(a);
-                          const double db = tileDist2(b);
-                          return da < db || (da == db && a < b);
-                      });
-    return {sorted.begin(), sorted.begin() + static_cast<std::ptrdiff_t>(maxTiles)};
+std::vector<OverscaledTileID> RenderTerrain::coarseMeshDEMTiles(const std::set<UnwrappedTileID>& cover,
+                                                                 uint8_t demMaxZoom) {
+    std::vector<OverscaledTileID> out;
+    for (const auto& id : cover) {
+        if (id.canonical.z < demMaxZoom) {
+            out.emplace_back(id.canonical.z, id.wrap, id.canonical);
+        }
+    }
+    return out;
+}
+
+std::vector<OverscaledTileID> RenderTerrain::meshDEMTiles(const std::set<UnwrappedTileID>& cover) const {
+    return demSource ? coarseMeshDEMTiles(cover, demSource->getMaxZoom()) : std::vector<OverscaledTileID>{};
 }
 
 void RenderTerrain::prepareSource(RenderOrchestrator& orchestrator) {

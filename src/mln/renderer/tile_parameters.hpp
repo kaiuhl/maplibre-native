@@ -1,6 +1,7 @@
 #pragma once
 
 #include <mln/map/mode.hpp>
+#include <mln/tile/tile_id.hpp>
 #include <mln/actor/scheduler.hpp>
 #include <mln/util/feature.hpp>
 #include <mln/util/geo.hpp>
@@ -8,6 +9,7 @@
 #include <memory>
 #include <numbers>
 #include <optional>
+#include <vector>
 
 #include <mapbox/std/weak.hpp>
 
@@ -68,6 +70,12 @@ public:
     /// TilePyramid::update), so that the heights there have usually arrived when the move ends.
     std::optional<LatLng> destinationCenter;
     double destinationZoom = 0;
+    /// The DEM tiles the 3D terrain's mesh binds that are coarser than the source's maxzoom
+    /// (RenderTerrain::meshDEMTiles), given to the 3D-terrain DEM source alone: loaded and kept,
+    /// not rendered, as the destination tiles are. To fit its tile budget the mesh draws far
+    /// ground with tiles coarser than the source covers it with, and a mesh tile with neither
+    /// its own DEM tile nor a loaded ancestor's is drawn flat, away from the ground it stands for.
+    std::vector<OverscaledTileID> terrainMeshTiles;
 };
 
 } // namespace mln
