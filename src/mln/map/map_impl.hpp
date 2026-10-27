@@ -166,9 +166,12 @@ public:
     /// from the map-side heights: where setCenterAltitudeKeepingView puts the centre on the
     /// terrain. Nullopt without heights there, or with the camera inside the terrain.
     std::optional<double> groundOnLineOfSight() const;
-    /// Puts the centre on that ground keeping the camera; false, changing nothing, where there is
-    /// none or setCenterAltitudeKeepingView refuses the move.
-    bool anchorCenterOnLineOfSight();
+    /// Moves the centre along the line of sight onto `ground`, keeping the camera: as far as the
+    /// zoom limits allow, and not at all where setCenterAltitudeKeepingView refuses it otherwise.
+    void anchorCenterOnLineOfSight(double ground);
+    /// Puts the centre on the ground once nothing is moving the camera: keeping a centre the camera
+    /// was set to, and otherwise the camera. True when it moved anything.
+    bool settleCenterOnGround();
     /// Moves the centre altitude to `elevationMeters` keeping lng/lat; false when the change
     /// is under the sub-metre threshold.
     bool clampCenterToTerrain(double elevationMeters);
