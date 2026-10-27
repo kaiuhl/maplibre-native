@@ -863,6 +863,38 @@ TEST(Transform, MoveKeepsToAPitchBoundThatChangesWhileItRuns) {
     }
 }
 
+// A move to a roll rolls the camera there and leaves the pitch alone. flyTo's frames (and so
+// easeTo's without LatLngBounds, which flies) set the pitch to the roll they interpolated instead,
+// and left the roll where it was.
+TEST(Transform, MoveToARollRollsAndKeepsThePitch) {
+    for (const bool fly : {true, false}) {
+        SCOPED_TRACE(fly ? "flyTo" : "easeTo");
+        Transform transform;
+        transform.resize({1000, 1000});
+        transform.jumpTo(CameraOptions().withCenter(LatLng{0, 0}).withZoom(10).withPitch(20));
+        const CameraOptions to = CameraOptions().withCenter(LatLng{0, 1}).withRoll(30);
+        const AnimationOptions animation(Seconds(1));
+        if (fly) {
+            transform.flyTo(to, animation);
+        } else {
+            transform.easeTo(to, animation);
+        }
+        const TimePoint start = transform.getTransitionStart();
+
+        transform.updateTransitions(start + Milliseconds(500));
+        CameraOptions camera = transform.getCameraOptions(std::nullopt);
+        EXPECT_NEAR(20.0, *camera.pitch, 1e-9);
+        EXPECT_GT(*camera.roll, 0.0);
+        EXPECT_LT(*camera.roll, 30.0);
+
+        transform.updateTransitions(start + Seconds(1));
+        EXPECT_FALSE(transform.inTransition());
+        camera = transform.getCameraOptions(std::nullopt);
+        EXPECT_NEAR(20.0, *camera.pitch, 1e-9);
+        EXPECT_NEAR(30.0, *camera.roll, 1e-9);
+    }
+}
+
 TEST(Transform, DefaultTransform) {
     struct TransformObserver : public mln::TransformObserver {
         void onCameraWillChange(MapObserver::CameraChangeMode) final { cameraWillChangeCallback(); };
