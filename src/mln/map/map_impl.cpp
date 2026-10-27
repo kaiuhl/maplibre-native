@@ -132,11 +132,8 @@ void Map::Impl::onUpdate() {
         returnCenterToSeaLevel();
     }
 
-    // The clamp stood aside for a transition or a gesture (onTerrainCenterElevationChanged), or is
-    // waiting for heights on the line of sight (settleCenterOnGround); now that neither is moving
-    // the camera, put the centre on the ground: once, at the end of a drag. The reported height
-    // outlives a terrain removed during the transition, so only apply it while there is still
-    // terrain.
+    // The clamp stood aside for a transition or a gesture (settleCenterOnGroundWhenStill): put the
+    // centre on the ground once neither moves the camera, while there is still terrain.
     if (centerAwaitingTerrainAnchor && !transform.inTransition() && !transform.isGestureInProgress()) {
         centerAwaitingTerrainAnchor = false;
         if (centerClampedToGround && style->impl->getTerrain() && !std::isnan(terrainCenterElevation)) {
@@ -467,23 +464,27 @@ void Map::Impl::settleCenterAwaitingSeaLevel() {
 
 void Map::Impl::onTerrainElevationIndexChanged(std::shared_ptr<const TerrainElevationIndex> index) {
     terrainElevationIndex = std::move(index);
+    // The clamp is waiting for heights on the line of sight (settleCenterOnGround): try these.
+    if (!centerAwaitingHeights) {
+        return;
+    }
+    centerAwaitingHeights = false;
+    if (centerClampedToGround && terrainElevationIndex && style->impl->getTerrain()) {
+        settleCenterOnGroundWhenStill();
+    }
 }
 
 void Map::Impl::onTerrainCenterElevationChanged(double elevationMeters) {
     terrainCenterElevation = elevationMeters;
-    if (!centerClampedToGround) {
-        return;
+    if (centerClampedToGround) {
+        settleCenterOnGroundWhenStill();
     }
-    // A running transition (an animated recenter, a fling) owns the camera: the jump below
-    // would cancel it, and across relief the height changes every frame, so the move stopped
-    // within a few kilometres of where it started. Let it finish; onUpdate applies the latest
-    // height once it has.
-    //
-    // A gesture moves the camera too, a frame at a time without a transition. Under a drag across
-    // relief the height changes every frame, and the camera rose and fell with it; kept instead,
-    // the zoom would change every frame. As gl-js does (HandlerManager's _terrainMovement), the
-    // centre stays at the height the gesture began on, the camera moving level, and is put on the
-    // ground keeping the camera once the gesture ends.
+}
+
+void Map::Impl::settleCenterOnGroundWhenStill() {
+    // A transition or a gesture owns the camera, and moving it here would cut the transition short
+    // or have the camera rise and fall with the ground under a drag. As gl-js does (HandlerManager's
+    // _terrainMovement), the centre keeps the height the move began on until it ends (onUpdate).
     if (transform.inTransition() || transform.isGestureInProgress()) {
         centerAwaitingTerrainAnchor = true;
         return;
@@ -515,7 +516,7 @@ bool Map::Impl::settleCenterOnGround() {
     if (!eye || eye->altitude <= terrainCenterElevation) {
         return clampCenterToTerrain(groundUnderCenter());
     }
-    centerAwaitingTerrainAnchor = true;
+    centerAwaitingHeights = true;
     return false;
 }
 

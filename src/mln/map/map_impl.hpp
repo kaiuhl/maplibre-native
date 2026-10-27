@@ -122,10 +122,10 @@ public:
     TileLodMode tileLodMode = TileLodMode::Default;
     TerrainLoadMode terrainLoadMode = TerrainLoadMode::Quality;
     TerrainSkirtLength terrainSkirtLength = TerrainSkirtLength::Auto;
-    /// Off by default: the clamp jumps the camera asynchronously, including part-way
-    /// through a gesture, and browsing a terrain map with it on runs away rather than
-    /// pans. Opt in with Map::setCenterClampedToGround until it is applied during render
-    /// setup instead, the way GL JS's recalculateZoomAndCenter is.
+    /// Whether the clamp puts the centre on the terrain (Map::setCenterClampedToGround); off by
+    /// default. It acts on the heights the renderer reports a frame behind, once no transition or
+    /// gesture moves the camera, rather than during render setup as GL JS's recalculateZoomAndCenter
+    /// does.
     bool centerClampedToGround = false;
     /// Terrain height under the centre, as the renderer last reported it (NaN until then).
     double terrainCenterElevation = std::numeric_limits<double>::quiet_NaN();
@@ -153,9 +153,12 @@ public:
     /// (the style's default no longer applies), runs a return to sea level still waiting, and
     /// records whether the camera is being set to a centre (cameraSetToCenter).
     void beginCameraChange(bool toCenter);
-    /// A height report arrived while a camera transition was running; the clamp applies it
-    /// once the transition ends instead of cutting the transition short.
+    /// The ground changed while a transition or a gesture moved the camera; the clamp puts the
+    /// centre on it once neither does (onUpdate).
     bool centerAwaitingTerrainAnchor = false;
+    /// The clamp, keeping the camera, found no ground on the line of sight in the map-side heights;
+    /// it tries again when they change (onTerrainElevationIndexChanged).
+    bool centerAwaitingHeights = false;
     /// Whether the camera was last set to a centre (easeTo, flyTo or jumpTo with one) and not cut
     /// short of it, rather than moved relative to the view (moveBy, rotateBy, a zoom or turn around
     /// an anchor: a gesture's deceleration), cancelled, or set as a camera (setFreeCameraOptions,
@@ -174,6 +177,8 @@ public:
     /// Puts the centre on the ground once nothing is moving the camera: keeping a centre the camera
     /// was set to, and otherwise the camera. True when it moved anything.
     bool settleCenterOnGround();
+    /// settleCenterOnGround now, or once no transition or gesture moves the camera.
+    void settleCenterOnGroundWhenStill();
     /// Moves the centre altitude to `elevationMeters` keeping lng/lat; false when the change
     /// is under the sub-metre threshold.
     bool clampCenterToTerrain(double elevationMeters);

@@ -734,6 +734,95 @@ TEST(TerrainCamera, DragKeepsItsZoomUntilTheFingerLifts) {
     EXPECT_GT(*test.map.getCameraOptions({}).zoom, zoom);
 }
 
+namespace {
+
+// A centre lifted off the ground just north of the equator, looking south, with the clamp on and
+// keeping the camera. The ground rises from 500 m to 600 m, a change the clamp acts on, and the line
+// of sight meets it beyond the centre, south of the equator, where the z2 tiles (y = 2) are held and
+// the coarser ones over them have no heights. At z10, where the camera is near enough the centre
+// that the projection's metres are the centre's.
+struct LineOfSightTest : TerrainCameraTest {
+    LineOfSightTest()
+        : TerrainCameraTest(MapMode::Continuous) {
+        tile = makeDEMTile(500.0);
+        fileSource->tileResponse = [this](const Resource& resource) -> std::optional<Response> {
+            Response res;
+            if (const auto& id = resource.tileData) {
+                if (id->z == 2 && id->y == 2 && holdSouth) {
+                    return std::nullopt; // still on its way
+                }
+                if (id->z == 0 || (id->z == 1 && id->y == 1)) {
+                    res.noContent = true;
+                    return res;
+                }
+            }
+            res.data = std::make_shared<std::string>(tile);
+            return res;
+        };
+        map.setCenterClampedToGround(true);
+        map.jumpTo(CameraOptions().withCenter(centre).withZoom(10.0).withPitch(60.0).withBearing(180.0));
+    }
+
+    template <typename Done>
+    void renderFor(Milliseconds duration, Done done) {
+        const auto deadline = Clock::now() + duration;
+        while (Clock::now() < deadline && !done()) {
+            loop.runOnce();
+            frontend.renderFrame();
+            std::this_thread::sleep_for(Milliseconds(16));
+        }
+    }
+
+    double altitude() const { return *map.getCameraOptions({}).centerAltitude; }
+
+    // Puts the centre on the 500 m ground, lifts it to 1000 m with a camera set that gives no centre,
+    // and raises the ground: the clamp waits for the heights where the line of sight meets it.
+    bool waitForTheGroundBeyond() {
+        renderFor(Seconds(3), [&] { return std::abs(altitude() - 500.0) < 0.5 && !map.isPanning(); });
+        if (std::abs(altitude() - 500.0) >= 0.5) {
+            return false;
+        }
+        map.jumpTo(CameraOptions().withCenterAltitude(1000.0));
+        map.getStyle().getTerrain()->setExaggeration(1.2f);
+        renderFor(Milliseconds(500), [] { return false; });
+        return !map.getTerrainElevation(beyond) && std::abs(altitude() - 1000.0) < 0.001;
+    }
+
+    const LatLng centre{0.005, 11.4041};
+    const LatLng beyond{-0.002, 11.4041};
+    bool holdSouth = true;
+};
+
+} // namespace
+
+// Once the heights where the line of sight meets the ground arrive, the clamp puts the centre on that
+// ground, keeping the camera: the height under the centre is known and stays the same, so no new
+// height report comes to wake it.
+TEST(TerrainCamera, CentreGoesOntoTheLineOfSightOnceItsHeightsArrive) {
+    LineOfSightTest test;
+    ASSERT_TRUE(test.waitForTheGroundBeyond());
+    const vec3 waiting = test.eye();
+
+    test.holdSouth = false;
+    test.renderFor(Seconds(3), [&] { return std::abs(test.altitude() - 600.0) < 0.5; });
+    ASSERT_TRUE(test.map.getTerrainElevation(test.beyond));
+    EXPECT_NEAR(test.altitude(), 600.0, 0.5);
+    EXPECT_LT(test.map.getCameraOptions({}).center->latitude(), 0.0);
+    test.expectEyeAt(waiting);
+}
+
+// While it waits for those heights, the clamp acts on them when they arrive and not on every frame: a
+// camera the app sets meanwhile is kept, as it is when the clamp is not waiting. Lowered to 900 m,
+// the line of sight meets the ground north of the equator, where its heights are known.
+TEST(TerrainCamera, CameraSetWhileTheClampWaitsForHeightsIsKept) {
+    LineOfSightTest test;
+    ASSERT_TRUE(test.waitForTheGroundBeyond());
+
+    test.map.jumpTo(CameraOptions().withCenterAltitude(900.0));
+    test.renderFor(Milliseconds(500), [] { return false; });
+    EXPECT_NEAR(test.altitude(), 900.0, 0.001);
+}
+
 // A centre the app jumped to is still the one the clamp keeps when the heights under it change:
 // it is put on the new ground there, at the zoom it was given.
 TEST(TerrainCamera, HeightsChangingAfterAJumpKeepTheCentre) {
