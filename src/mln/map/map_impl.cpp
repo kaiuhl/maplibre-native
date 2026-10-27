@@ -132,11 +132,12 @@ void Map::Impl::onUpdate() {
         returnCenterToSeaLevel();
     }
 
-    // The clamp stood aside for a transition (onTerrainCenterElevationChanged), or is waiting for
-    // heights on the line of sight (settleCenterOnGround); now that the transition is over, put
-    // the centre on the ground. The reported height outlives a terrain removed during the
-    // transition, so only apply it while there is still terrain.
-    if (centerAwaitingTerrainAnchor && !transform.inTransition()) {
+    // The clamp stood aside for a transition or a gesture (onTerrainCenterElevationChanged), or is
+    // waiting for heights on the line of sight (settleCenterOnGround); now that neither is moving
+    // the camera, put the centre on the ground: once, at the end of a drag. The reported height
+    // outlives a terrain removed during the transition, so only apply it while there is still
+    // terrain.
+    if (centerAwaitingTerrainAnchor && !transform.inTransition() && !transform.isGestureInProgress()) {
         centerAwaitingTerrainAnchor = false;
         if (centerClampedToGround && style->impl->getTerrain() && !std::isnan(terrainCenterElevation)) {
             settleCenterOnGround();
@@ -462,7 +463,13 @@ void Map::Impl::onTerrainCenterElevationChanged(double elevationMeters) {
     // would cancel it, and across relief the height changes every frame, so the move stopped
     // within a few kilometres of where it started. Let it finish; onUpdate applies the latest
     // height once it has.
-    if (transform.inTransition()) {
+    //
+    // A gesture moves the camera too, a frame at a time without a transition. Under a drag across
+    // relief the height changes every frame, and the camera rose and fell with it; kept instead,
+    // the zoom would change every frame. As gl-js does (HandlerManager's _terrainMovement), the
+    // centre stays at the height the gesture began on, the camera moving level, and is put on the
+    // ground keeping the camera once the gesture ends.
+    if (transform.inTransition() || transform.isGestureInProgress()) {
         centerAwaitingTerrainAnchor = true;
         return;
     }

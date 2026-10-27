@@ -706,6 +706,34 @@ TEST(TerrainCamera, DragAcrossAStepKeepsTheCameraLevel) {
     EXPECT_NEAR(test.altitude(), westPlateauMeters, 5.0);
 }
 
+// The clamp waits for the finger to lift, as gl-js's does: the drag keeps the zoom and the height
+// it began at throughout, and the centre goes onto the ground along the line of sight once, keeping
+// the camera, when the gesture ends.
+TEST(TerrainCamera, DragKeepsItsZoomUntilTheFingerLifts) {
+    TerrainTransitionTest test;
+    ASSERT_TRUE(test.settleOnPlateau());
+    const double zoom = *test.map.getCameraOptions({}).zoom;
+
+    test.map.setGestureInProgress(true);
+    test.map.anchorCenterOnTerrain();
+    for (int i = 0; i < 30; ++i) {
+        test.map.moveBy({10.0, 0.0});
+        test.renderFrame();
+        ASSERT_NEAR(*test.map.getCameraOptions({}).zoom, zoom, 1e-12) << "frame " << i;
+        ASSERT_NEAR(test.altitude(), plateauMeters, 0.5) << "frame " << i;
+    }
+    ASSERT_LT(test.map.getCameraOptions({}).center->longitude(), -5.0);
+
+    const vec3 dragged = test.eye();
+    test.map.setGestureInProgress(false);
+    const vec3 lifted = test.eye();
+    for (int i = 0; i < 3; ++i) {
+        EXPECT_NEAR(lifted[i], dragged[i], mercatorMetre) << "axis " << i;
+    }
+    EXPECT_NEAR(test.altitude(), westPlateauMeters, 5.0);
+    EXPECT_GT(*test.map.getCameraOptions({}).zoom, zoom);
+}
+
 // A centre the app jumped to is still the one the clamp keeps when the heights under it change:
 // it is put on the new ground there, at the zoom it was given.
 TEST(TerrainCamera, HeightsChangingAfterAJumpKeepTheCentre) {
