@@ -481,9 +481,19 @@ void Map::Impl::keepCameraAboveTerrain() {
 void Map::Impl::returnCenterToSeaLevel() {
     centerAwaitingSeaLevel = false;
     centerHeldOverUnknownGround = false;
+    const CameraOptions before = transform.getCameraOptions(std::nullopt);
     // Where the limits refuse the move that keeps the view, keep the centre and zoom instead, as
     // gl-js does (applyTerrainChange), rather than leave the centre up in the air.
-    if (!setCenterAltitudeKeepingView(0.0) && transform.getState().getCenterAltitude() != 0.0) {
+    if (setCenterAltitudeKeepingView(0.0)) {
+        // That takes the centre off one the camera was set to, which the clamp would then keep at sea
+        // level once terrain returns (a style reload), lifting the camera off the view.
+        if (cameraSetToCenter) {
+            centerBeforeSeaLevel = CameraOptions()
+                                       .withCenter(before.center)
+                                       .withZoom(before.zoom)
+                                       .withCenterAltitude(before.centerAltitude);
+        }
+    } else if (transform.getState().getCenterAltitude() != 0.0) {
         transform.jumpTo(CameraOptions().withCenterAltitude(0.0));
     }
 }
@@ -547,7 +557,16 @@ bool Map::Impl::settleCenterOnGround() {
     // A centre the camera was set to (a jump, or an animated move run to its end) is put on the
     // ground under it, keeping it and the zoom: the camera moves onto that ground.
     if (cameraSetToCenter) {
-        return clampCenterToTerrain(groundUnderCenter(), cameraSetToCenterAnimated);
+        // Back to that centre where a return to sea level took the camera off it keeping the view,
+        // now there is terrain again: the camera stays, and the centre is the one it was set to.
+        bool restored = false;
+        if (centerBeforeSeaLevel && style->impl->getTerrain()) {
+            const LatLng before = transform.getLatLng();
+            transform.jumpTo(*std::exchange(centerBeforeSeaLevel, std::nullopt));
+            forgetGroundUnderCenterIfMoved(before);
+            restored = true;
+        }
+        return clampCenterToTerrain(groundUnderCenter(), cameraSetToCenterAnimated) || restored;
     }
     // After a move relative to the view (a fling, a drag, a pinch, an animation cut short) the
     // camera stays, and the centre moves along the line of sight onto the ground it meets, the zoom
@@ -657,6 +676,7 @@ void Map::Impl::beginCameraChange(bool toCenter) {
     // arrive (onUpdate): a centre given, or else the camera.
     cameraSetToCenter = toCenter;
     cameraSetToCenterAnimated = false;
+    centerBeforeSeaLevel.reset();
 }
 
 void Map::Impl::jumpTo(const CameraOptions& camera) {

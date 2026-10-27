@@ -1643,19 +1643,30 @@ TEST(TerrainCamera, ClampPutsTheCentreBackOnTerrainThatReturns) {
 // again once that has loaded. The map returns the centre to sea level as the terrain goes; the new
 // terrain then finds the ground the old one reported, and the clamp has to put the centre back on
 // it all the same, or the view stays dropped until the ground under the centre changes (8-30 s and
-// more after a flight in the simulator).
+// more after a flight in the simulator). The centre it puts back is the one the camera was set to,
+// not the one at sea level the return left, so the camera ends where the reload found it.
 TEST(TerrainCamera, ClampPutsTheCentreBackOnTheGroundAfterAStyleReload) {
     TerrainTransitionTest test;
     ASSERT_TRUE(test.settleOnPlateau());
+    const vec3 before = test.eye();
+    const LatLng center = *test.map.getCameraOptions({}).center;
 
     test.reloadStyle();
     ASSERT_NEAR(test.altitude(), 0.0, 0.001) << "the terrain went, and the centre with it";
     EXPECT_TRUE(test.settleOnPlateau()) << "centre altitude " << test.altitude();
+
+    const vec3 actual = test.eye();
+    for (int i = 0; i < 3; ++i) {
+        EXPECT_NEAR(actual[i], before[i], mercatorMetre) << "axis " << i;
+    }
+    EXPECT_NEAR(test.map.getCameraOptions({}).center->latitude(), center.latitude(), 1e-6);
+    EXPECT_NEAR(test.map.getCameraOptions({}).center->longitude(), center.longitude(), 1e-6);
 }
 
 // The same over ground whose heights haven't arrived. The new terrain knows no more of it than the
-// old one did; the clamp holds the centre at sea level, where the reload left it, and eases it onto
-// the ground once that arrives rather than jumping the view there, as for a move that ends over it.
+// old one did; the clamp holds the centre the jump gave it where the jump left it, as before the
+// reload, and eases it onto the ground once that arrives rather than jumping the view there, as for
+// a move that ends over it.
 TEST(TerrainCamera, StyleReloadOverUnloadedGroundHoldsTheCentreThenEases) {
     TerrainTransitionTest test;
     test.holdWestEntirely = true;
@@ -1671,11 +1682,65 @@ TEST(TerrainCamera, StyleReloadOverUnloadedGroundHoldsTheCentreThenEases) {
         test.renderFrame();
     }
     ASSERT_FALSE(test.map.getTerrainElevation(test.westTarget)) << "the plateau's heights are still on their way";
-    EXPECT_NEAR(test.altitude(), 0.0, 0.001);
+    EXPECT_NEAR(test.altitude(), plateauMeters, 1.0);
 
-    // Eased onto the plateau, 2000 m up, over 0.4 s, where a jump takes one frame.
+    // Eased onto the plateau, 1000 m up, over 0.4 s, where a jump takes one frame.
     EXPECT_GE(test.millisecondsRisingOntoWestPlateau(), 300.0);
     EXPECT_NEAR(test.altitude(), westPlateauMeters, 5.0);
+    EXPECT_NEAR(test.map.getCameraOptions({}).center->latitude(), test.westTarget.latitude(), 1e-6);
+    EXPECT_NEAR(test.map.getCameraOptions({}).center->longitude(), test.westTarget.longitude(), 1e-6);
+}
+
+// A style reload that comes as an animated move to a centre ends: the reload's first update finds
+// the move over, and the terrain going returns the centre to sea level keeping the view, which takes
+// it off the centre the move was given. Once the new terrain's heights came, the clamp kept the centre
+// at sea level and its zoom as if the move had been given them, and lifted the camera 2000 m onto the
+// ground there, 3.5 km beyond where the move arrived. It puts the centre the move was given back on
+// the ground instead: the camera stays where the move left it.
+TEST(TerrainCamera, MoveEndingAsTheStyleReloadsStaysWhereItArrived) {
+    TerrainTransitionTest test;
+    ASSERT_TRUE(test.settleOnPlateau());
+    // So that the move eases onto the plateau on its way, and arrives on it.
+    ASSERT_TRUE(test.map.getTerrainElevation(test.westTarget));
+
+    bool finished = false;
+    double zoomAtEnd = 0.0;
+    double altitudeAtEnd = 0.0;
+    AnimationOptions animation(Milliseconds(600));
+    animation.transitionFinishFn = [&] {
+        finished = true;
+        test.eyeAtEnd = test.eye();
+        zoomAtEnd = *test.map.getCameraOptions({}).zoom;
+        altitudeAtEnd = test.altitude();
+    };
+    test.map.easeTo(CameraOptions().withCenter(test.westTarget), animation);
+    // No frame runs the move meanwhile, so the reload's first update is the one that finds it over.
+    std::this_thread::sleep_for(Milliseconds(700));
+    ASSERT_FALSE(finished);
+    test.reloadStyle();
+    ASSERT_TRUE(finished);
+    ASSERT_NEAR(altitudeAtEnd, westPlateauMeters, 5.0) << "arrived on the plateau";
+    ASSERT_NEAR(test.altitude(), 0.0, 0.001) << "the terrain went, and the centre with it";
+    test.expectEyeAtEnd();
+
+    // The new terrain's heights arrive, and the clamp has a second to act on them.
+    const auto deadline = Clock::now() + Seconds(10);
+    while (Clock::now() < deadline && !test.map.getTerrainElevation(test.westTarget)) {
+        test.renderFrame();
+        std::this_thread::sleep_for(Milliseconds(16));
+    }
+    ASSERT_TRUE(test.map.getTerrainElevation(test.westTarget));
+    for (const auto until = Clock::now() + Seconds(1); Clock::now() < until;) {
+        test.renderFrame();
+        std::this_thread::sleep_for(Milliseconds(16));
+    }
+
+    test.expectEyeAtEnd();
+    const auto camera = test.map.getCameraOptions({});
+    EXPECT_NEAR(camera.center->latitude(), test.westTarget.latitude(), 1e-6);
+    EXPECT_NEAR(camera.center->longitude(), test.westTarget.longitude(), 1e-6);
+    EXPECT_NEAR(*camera.zoom, zoomAtEnd, 1e-6);
+    EXPECT_NEAR(*camera.centerAltitude, westPlateauMeters, 5.0);
 }
 
 // The terrain height under a position reads the loaded DEM, as drawn: nothing before a tile

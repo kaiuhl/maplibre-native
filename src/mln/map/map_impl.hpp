@@ -177,6 +177,11 @@ public:
     /// than a jump: the clamp eases it onto ground that changes under it once the move has ended,
     /// as the move did on the way (easeTransitionOntoGround), rather than jumping the view there.
     bool cameraSetToCenterAnimated = false;
+    /// That centre, with its zoom and altitude, where the terrain went and the return to sea level
+    /// took the camera off it keeping the view (returnCenterToSeaLevel). The clamp puts it back, and
+    /// then on the ground, once there is terrain again (a style reload adds it straight back), rather
+    /// than keep the centre at sea level and lift the camera off the view. Until the camera is set.
+    std::optional<CameraOptions> centerBeforeSeaLevel;
     /// The ground under the centre as it is now: the map-side heights where they have it, else the
     /// height the renderer last reported.
     double groundUnderCenter() const;
