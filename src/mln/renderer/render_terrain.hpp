@@ -300,6 +300,8 @@ public:
         /// requested tile into normalized coordinates (0..1) of the DEM tile
         std::array<float, 4> demCoords;
         float demDim;
+        /// Zoom of the DEM tile the texture is, or for one sampled from several, the deepest
+        uint8_t demZoom = 0;
     };
 
     /**
@@ -307,6 +309,23 @@ public:
      * from the matching DEM tile or its closest available ancestor
      */
     std::optional<TerrainData> getTerrainData(const UnwrappedTileID&) const;
+
+    /**
+     * @brief As getTerrainData, and for a tile shallower than the DEM loaded over it - one from a
+     * source whose maxzoom is below the DEM's zoom there, under no DEM tile or only a prefetched
+     * one zooms coarser - a DEM texture of its own sampled from the heights loaded under it, so
+     * its symbols, circles and extrusions stand on the heights the terrain mesh draws and the CPU
+     * places them on (elevationSampler), not at sea level or on the coarse tile's.
+     */
+    std::optional<TerrainData> getTerrainData(const UnwrappedTileID&, gfx::Context&);
+
+    /**
+     * @brief Called once a frame after updateElevationIndex: whether a DEM getTerrainData sampled
+     * for this frame's drawables is out of date with the heights now loaded, was wanted before any
+     * had, or was left for a later frame, so the frame after should draw them again. Starts the
+     * next frame.
+     */
+    bool takeSampledDEMRedraw();
 
     /// Mesh resolution (grid cells per side)
     static constexpr size_t MESH_SIZE = 128;
@@ -502,6 +521,42 @@ private:
     // used in the current frame are evicted least-recently-used first beyond
     // this, preventing unbounded growth while browsing (previously reached 2GB+)
     static constexpr size_t maxDEMTextures = 96;
+
+    /// getTerrainData's textures for tiles shallower than the DEM loaded over them, sampled from
+    /// elevationIndex; rebuilt when the heights loaded over the tile change (TerrainElevationIndex::
+    /// cover, looked up once per index)
+    struct SampledDEMEntry {
+        std::shared_ptr<gfx::Texture2D> texture;
+        /// The cover the texture was sampled from, and the frame it was
+        std::size_t signature = 0;
+        uint64_t sampledFrame = 0;
+        TerrainElevationIndex::Cover cover;
+        /// The frame `cover` last changed in
+        uint64_t coverChangedFrame = 0;
+        uint64_t indexGeneration = 0;
+        uint64_t lastUsedFrame = 0;
+    };
+    std::map<UnwrappedTileID, SampledDEMEntry> sampledDEMTextures;
+    static constexpr int32_t sampledDEMDim = 256;
+    /// Kept beyond those a frame draws with, which are never dropped
+    static constexpr size_t maxSampledDEMTextures = 32;
+    /// Sampling one takes a third of a millisecond or more: a frame samples this many, and those
+    /// left over draw on their ancestor's DEM, or the one sampled before, until the frames after
+    static constexpr int maxSampledDEMBuildsPerFrame = 4;
+    /// A tile's DEM gone stale is sampled again once the heights over it have not changed for
+    /// this many frames, or this many after it was last sampled while they keep changing: turning
+    /// the map loads and drops the DEM tiles under a shallow tile every few frames, and sampling
+    /// it each time rebuilt one z12 tile 33 times in two 4 s turns (Mt Hood, iOS simulator)
+    static constexpr uint64_t sampledDEMSettleFrames = 15;
+    static constexpr uint64_t sampledDEMMaxStaleFrames = 60;
+    /// Bumped whenever elevationIndex is replaced
+    uint64_t elevationIndexGeneration = 0;
+    /// Frames counted by takeSampledDEMRedraw; whether this one asked for a sampled DEM before any
+    /// height had loaded, how many it sampled, and whether it left any for the next
+    uint64_t sampledDEMFrame = 0;
+    bool sampledDEMMissed = false;
+    int sampledDEMBuilds = 0;
+    bool sampledDEMDeferred = false;
     uint64_t demUpdateCounter = 0;
 
     /// Per-tile height copies behind elevationIndex, kept across rebuilds so a new tile set

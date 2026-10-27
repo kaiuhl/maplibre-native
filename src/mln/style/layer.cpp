@@ -12,6 +12,8 @@
 #include <mln/util/enum.hpp>
 #include <mln/util/logging.hpp>
 
+#include <algorithm>
+
 namespace mln {
 namespace style {
 
@@ -148,6 +150,19 @@ void Layer::setMaxZoom(float maxZoom) {
     if (getMaxZoom() == maxZoom) return;
     auto impl_ = mutableBaseImpl();
     impl_->maxZoom = maxZoom;
+    baseImpl = std::move(impl_);
+    observer->onLayerChanged(*this);
+}
+
+float Layer::getTerrainOccludedOpacity() const {
+    return baseImpl->terrainOccludedOpacity;
+}
+
+void Layer::setTerrainOccludedOpacity(float opacity) {
+    opacity = std::clamp(opacity, 0.0f, 1.0f);
+    if (getTerrainOccludedOpacity() == opacity) return;
+    auto impl_ = mutableBaseImpl();
+    impl_->terrainOccludedOpacity = opacity;
     baseImpl = std::move(impl_);
     observer->onLayerChanged(*this);
 }

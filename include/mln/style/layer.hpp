@@ -148,6 +148,13 @@ public:
     void setMinZoom(float);
     void setMaxZoom(float);
 
+    /// How strongly a symbol or circle layer still draws where 3D terrain stands between it and
+    /// the camera, from 0 (hidden, as maplibre-gl-js hides it) to 1 (drawn as if the terrain
+    /// were not there). Not a style-spec property: a runtime setting, for the one layer a map
+    /// wants seen through a ridge, such as the ring round a selected feature.
+    float getTerrainOccludedOpacity() const;
+    void setTerrainOccludedOpacity(float);
+
     // Dynamic properties
     enum class PropertyScope {
         Paint,

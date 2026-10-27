@@ -3,6 +3,7 @@
 #include <mln/gfx/context.hpp>
 #include <mln/gfx/drawable.hpp>
 #include <mln/renderer/layer_group.hpp>
+#include <mln/renderer/layer_tweaker.hpp>
 #include <mln/renderer/paint_parameters.hpp>
 #include <mln/renderer/render_terrain.hpp>
 #include <mln/shaders/terrain_layer_ubo.hpp>
@@ -71,19 +72,14 @@ void TerrainLayerTweaker::execute(LayerGroupBase& layerGroup, const PaintParamet
         // symbol / circle layers consistently, matching maplibre-gl-js.
         mat4 matrix = parameters.matrixForTile(tileID);
 
-#if !MLN_RENDER_BACKEND_OPENGL
         // matrixForTile builds a GL-convention projection (clip z in [-1, 1]); Vulkan,
-        // Metal and WebGPU clip to [0, 1]. Remap clip z from [-1, 1] to [0, 1] the usual
-        // way, z' = (z + w) / 2, so terrain that projects into the near half of the GL
-        // clip volume (z < 0) is not clipped away on those backends. Matches
-        // LayerTweaker::getTileMatrix and clipMatrixForTile, which remap the draped / RTT
-        // matrices for the same reason. Monotonic, so skirt-vs-surface depth ordering and
+        // Metal and WebGPU clip to [0, 1]. Remap clip z so terrain that projects into the
+        // near half of the GL clip volume (z < 0) is not clipped away on those backends.
+        // Matches LayerTweaker::getTileMatrix and clipMatrixForTile, which remap the draped /
+        // RTT matrices for the same reason, and the fill-extrusion tweaker, whose walls
+        // depth-test against this surface. Monotonic, so skirt-vs-surface depth ordering and
         // the packed depth texture used for symbol occlusion are preserved; GL unchanged.
-        matrix[2] = 0.5 * (matrix[2] + matrix[3]);
-        matrix[6] = 0.5 * (matrix[6] + matrix[7]);
-        matrix[10] = 0.5 * (matrix[10] + matrix[11]);
-        matrix[14] = 0.5 * (matrix[14] + matrix[15]);
-#endif
+        LayerTweaker::remapClipDepth(matrix);
 
 #if !MLN_UBO_CONSOLIDATION
         auto& drawableUniforms = drawable.mutableUniformBuffers();

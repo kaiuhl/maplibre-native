@@ -122,6 +122,15 @@ void SymbolLayerTweaker::execute(LayerGroupBase& layerGroup, const PaintParamete
 
         const auto& paintProperties = bucket->paintProperties.at(id);
 
+        // The terrain surface writes depth so its skirts get occluded; symbols
+        // must not depth-test against it (their occlusion behind terrain comes
+        // from the depth texture / calculate_visibility), or a label would
+        // be culled by the very surface it labels. Depth stays on without terrain.
+        // Set ahead of the matrix, which carries a per-layer depth offset only for
+        // drawables that depth-test (multiplyWithProjectionMatrix).
+        const bool terrainEnabled = parameters.terrain && parameters.terrain->isEnabled();
+        drawable.setEnableDepth(!terrainEnabled);
+
         // from RenderTile::translatedMatrix
         const auto translate = isText ? evaluated.get<style::TextTranslate>() : evaluated.get<style::IconTranslate>();
 
@@ -169,10 +178,9 @@ void SymbolLayerTweaker::execute(LayerGroupBase& layerGroup, const PaintParamete
 
         // When terrain is enabled, bind the covering DEM tile so the vertex
         // shader can displace symbol anchors by the terrain elevation
-        const bool terrainEnabled = parameters.terrain && parameters.terrain->isEnabled();
         std::optional<RenderTerrain::TerrainData> terrainData;
         if (terrainEnabled) {
-            terrainData = parameters.terrain->getTerrainData(tileID);
+            terrainData = parameters.terrain->getTerrainData(tileID, context);
         }
         if (parameters.terrain) {
             drawable.setTexture(
@@ -181,12 +189,6 @@ void SymbolLayerTweaker::execute(LayerGroupBase& layerGroup, const PaintParamete
             // Packed terrain depth for occlusion (calculate_visibility)
             drawable.setTexture(parameters.terrain->getDepthTexture(context), idSymbolDepthTexture);
         }
-
-        // The terrain surface writes depth so its skirts get occluded; symbols
-        // must not depth-test against it (their occlusion behind terrain comes
-        // from the depth texture / calculate_visibility above), or a label would
-        // be culled by the very surface it labels. Depth stays on without terrain.
-        drawable.setEnableDepth(!terrainEnabled);
 
 #if MLN_UBO_CONSOLIDATION
         drawableUBOVector[i] = {
@@ -215,7 +217,7 @@ void SymbolLayerTweaker::execute(LayerGroupBase& layerGroup, const PaintParamete
             .opacity_t = getInterpFactor<TextOpacity, IconOpacity, 0>(paintProperties, isText, zoom),
             .halo_width_t = getInterpFactor<TextHaloWidth, IconHaloWidth, 0>(paintProperties, isText, zoom),
             .halo_blur_t = getInterpFactor<TextHaloBlur, IconHaloBlur, 0>(paintProperties, isText, zoom),
-            .pad1 = 0,
+            .occluded_opacity = symbolLayerProperties.layerImpl().terrainOccludedOpacity,
             .pad2 = 0,
             .pad3 = 0,
 

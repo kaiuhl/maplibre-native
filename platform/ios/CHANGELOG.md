@@ -4,6 +4,8 @@ MapLibre welcomes participation and contributions from everyone. Please read [`M
 
 ## main
 
+- With 3D terrain, labels, icons and circles behind a ridge are hidden, as in MapLibre GL JS, instead of showing through it faded or whole; a fill extrusion behind a ridge no longer draws over it; and a label or icon from a source whose `maxzoom` is below the terrain's DEM tiles stands on the terrain drawn instead of at sea level under it or on a coarser prefetched DEM tile's heights.
+- Add `MLNStyleLayer.terrainOccludedOpacity`, how strongly a symbol or circle layer still draws where 3D terrain stands in front of it, from 0 (hidden, the default) to 1, for a layer that should stay faintly visible through a ridge, such as a ring round a selected feature.
 - Fix an animated camera move going to its destination in one frame when the camera is set from `-mapView:regionIsChangingWithReason:` or `-mapViewRegionIsChanging:` while it runs, as setting `maximumPitch` below the camera's pitch does. The camera set now cancels the move where it is, as one set at any other time does.
 - Fix a camera animation ending early when `maximumPitch`, `minimumPitch`, `minimumZoomLevel`, `maximumZoomLevel` or `maximumScreenBounds` is set while it runs, as from `-mapView:regionIsChangingWithReason:`. The camera is brought within the new limits where it is, and the animation goes on to its destination within them, back up to its own pitch when a lowered `maximumPitch` rises again.
 - Fix `-flyToCamera:completionHandler:` and an animated `-setCamera:animated:`, to an `MLNMapCamera` with a `roll`, tilting the map by the roll and leaving it unrolled.

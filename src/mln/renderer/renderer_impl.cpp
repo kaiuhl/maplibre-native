@@ -734,6 +734,7 @@ void Renderer::Impl::render(const RenderTree& renderTree, const std::shared_ptr<
     // follow-up frame or it would idle blank until the view is panned - most visible when
     // terrain is toggled back on over an otherwise static map. Bounded so it cannot spin.
     bool terrainCoverPending = false;
+    bool sampledDEMRedraw = false;
     if (orchestrator.getRenderTerrain() && frameDrapeTargetCount == 0) {
         if (terrainCoverRetryFrames > 0) {
             --terrainCoverRetryFrames;
@@ -752,6 +753,9 @@ void Renderer::Impl::render(const RenderTree& renderTree, const std::shared_ptr<
         if (auto* terrain = orchestrator.getRenderTerrain()) {
             terrain->updateElevationIndex();
             elevationIndex = terrain->getElevationIndex();
+            // A tile shallower than the DEM drew this frame with heights sampled before these
+            // (RenderTerrain::getTerrainData): draw it again with them
+            sampledDEMRedraw = terrain->takeSampledDEMRedraw();
         }
         if (elevationIndex != reportedElevationIndex) {
             reportedElevationIndex = elevationIndex;
@@ -787,7 +791,7 @@ void Renderer::Impl::render(const RenderTree& renderTree, const std::shared_ptr<
         // budget deferred any new tile, so deferred drapes/tiles catch up progressively even
         // after the interaction stops.
         renderTreeParameters.needsRepaint || drapeWorkDeferred || context.newTileBuildWasDeferred() ||
-            terrainCoverPending,
+            terrainCoverPending || sampledDEMRedraw,
         renderTreeParameters.placementChanged,
         std::move(stats));
 

@@ -40,7 +40,7 @@ struct alignas(16) SymbolDrawableUBO {
     /* 248 */ float opacity_t;
     /* 252 */ float halo_width_t;
     /* 256 */ float halo_blur_t;
-    /* 260 */ float pad1;
+    /* 260 */ float occluded_opacity;
     /* 264 */ float pad2;
     /* 268 */ float pad3;
 
@@ -249,7 +249,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float2 posOffset = a_offset * max(a_minFontScale, fontScale) / 32.0 + a_pxoffset / 16.0;
     const float4 position = drawable.coord_matrix * float4(pos0 + rotation_matrix * posOffset, z, 1.0);
     // Fade out symbols hidden behind the terrain (see calculate_visibility)
-    const half vis = half(calculate_visibility(projectedPoint, depthTexture, depthSampler, drawable.depth_enabled));
+    const half vis = half(calculate_visibility(projectedPoint, drawable.matrix, depthTexture, depthSampler, drawable.depth_enabled, drawable.occluded_opacity));
 
     return {
         .position     = position,
@@ -472,7 +472,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float2 pos0 = projected_pos.xy / projected_pos.w + rotation_matrix * pos_rot;
     const float4 position = drawable.coord_matrix * float4(pos0, z, 1.0);
     // Fade out symbols hidden behind the terrain (see calculate_visibility)
-    const half vis = half(calculate_visibility(projectedPoint, depthTexture, depthSampler, drawable.depth_enabled));
+    const half vis = half(calculate_visibility(projectedPoint, drawable.matrix, depthTexture, depthSampler, drawable.depth_enabled, drawable.occluded_opacity));
 
     return {
         .position     = position,
@@ -656,10 +656,10 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const DynamicInstance* dynamicInstances [[buffer(symbolUBOCount + 3)]],
                                 device const OpacityInstance* opacityInstances [[buffer(symbolUBOCount + 4)]],
                                 device const DataInstance* dataInstances [[buffer(symbolUBOCount + 5)]],
-                                texture2d<float, access::sample> demTexture [[texture(1)]],
-                                sampler demSampler [[sampler(1)]],
-                                texture2d<float, access::sample> depthTexture [[texture(2)]],
-                                sampler depthSampler [[sampler(2)]]) {
+                                texture2d<float, access::sample> demTexture [[texture(2)]],
+                                sampler demSampler [[sampler(2)]],
+                                texture2d<float, access::sample> depthTexture [[texture(3)]],
+                                sampler depthSampler [[sampler(3)]]) {
 
 #if defined(HAS_UNIFORM_u_sorted_instance)
     const uint instance = instanceID;
@@ -756,7 +756,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float gamma_scale = position.w;
     const bool is_icon = (is_sdf == ICON);
     // Fade out symbols hidden behind the terrain (see calculate_visibility)
-    const half vis = half(calculate_visibility(projectedPoint, depthTexture, depthSampler, drawable.depth_enabled));
+    const half vis = half(calculate_visibility(projectedPoint, drawable.matrix, depthTexture, depthSampler, drawable.depth_enabled, drawable.occluded_opacity));
 
     return {
         .position     = position,

@@ -27,7 +27,7 @@ struct alignas(16) CircleDrawableUBO {
     /*  88 */ float stroke_color_t;
     /*  92 */ float stroke_width_t;
     /*  96 */ float stroke_opacity_t;
-    /* 100 */ float pad1;
+    /* 100 */ float occluded_opacity;
     /* 104 */ float pad2;
     /* 108 */ float pad3;
 
@@ -37,7 +37,7 @@ struct alignas(16) CircleDrawableUBO {
     /* 144 */ float dem_dim;
     /* 148 */ float dem_exaggeration;
     /* 152 */ float dem_enabled;
-    /* 156 */ float pad4;
+    /* 156 */ float depth_enabled;
     /* 160 */
 };
 static_assert(sizeof(CircleDrawableUBO) == 10 * 16, "wrong size");
@@ -69,7 +69,7 @@ struct ShaderSource<BuiltIn::CircleShader, gfx::Backend::Type::Metal> {
 
     static const std::array<AttributeInfo, 8> attributes;
     static constexpr std::array<AttributeInfo, 0> instanceAttributes{};
-    static const std::array<TextureInfo, 1> textures;
+    static const std::array<TextureInfo, 2> textures;
 
     static constexpr auto prelude = circleShaderPrelude;
     static constexpr auto source = R"(
@@ -104,6 +104,8 @@ struct FragmentStage {
     float4 position [[position, invariant]];
     float2 extrude;
     float antialiasblur;
+    // 0 behind the 3D terrain, 1 in front of it (calculate_visibility)
+    half visibility;
 
 #if !defined(HAS_UNIFORM_u_color)
     half4 color;
@@ -134,7 +136,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const CircleDrawableUBO* drawableVector [[buffer(idCircleDrawableUBO)]],
                                 device const CircleEvaluatedPropsUBO& props [[buffer(idCircleEvaluatedPropsUBO)]],
                                 texture2d<float, access::sample> demTexture [[texture(0)]],
-                                sampler demSampler [[sampler(0)]]) {
+                                sampler demSampler [[sampler(0)]],
+                                texture2d<float, access::sample> depthTexture [[texture(1)]],
+                                sampler depthSampler [[sampler(1)]]) {
 
     device const CircleDrawableUBO& drawable = drawableVector[uboIndex];
 
@@ -192,10 +196,16 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     // to keep the blur at roughly 1px, the two are inversely related.
     const half antialiasblur = 1.0 / DEVICE_PIXEL_RATIO / (radius + stroke_width);
 
+    // Hidden behind the terrain by its centre, as maplibre-gl-js's circle shader
+    const half visibility = half(calculate_visibility(
+        drawable.matrix * float4(circle_center, ele, 1), drawable.matrix, depthTexture, depthSampler, drawable.depth_enabled,
+        drawable.occluded_opacity));
+
     return {
         .position       = position,
         .extrude        = extrude,
         .antialiasblur  = antialiasblur,
+        .visibility     = visibility,
 
 #if !defined(HAS_UNIFORM_u_color)
         .color          = half4(unpack_mix_color(vertx.color, drawable.color_t)),
@@ -269,7 +279,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     const float color_t = (stroke_width < 0.01) ? 0.0 :
         smoothstep(antialiased_blur, 0.0, extrude_length - radius / (radius + stroke_width));
 
-    return half4(opacity_t * mix(color * opacity, stroke_color * stroke_opacity, color_t));
+    return half4(in.visibility * opacity_t * mix(color * opacity, stroke_color * stroke_opacity, color_t));
 }
 )";
 };
