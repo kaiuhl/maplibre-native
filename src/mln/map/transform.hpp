@@ -121,8 +121,9 @@ public:
     /// a transition or for one with no centre of its own (moveBy, rotateBy, a zoom around an anchor).
     std::optional<LatLng> getTransitionCenter() const;
     /// Moves the centre altitude a running transition arrives at to `altitudeMeters`, carrying on
-    /// from the altitude it has reached so that nothing jumps (gl-js's Camera._updateElevation).
-    /// Nothing without a transition, or on its last frame.
+    /// from the altitude it has reached so that nothing jumps (gl-js's Camera._updateElevation):
+    /// over what is left of the transition, or over 0.4 s at least, the transition lingering past
+    /// its end for it. Nothing without a transition.
     void retargetTransitionCenterAltitude(double altitudeMeters);
 
     // Gesture
@@ -166,16 +167,22 @@ private:
 
     TimePoint transitionStart;
     Duration transitionDuration;
+    /// The time the running transition's frame is drawing, and until when it runs past its end for
+    /// a centre altitude still on its way to a late target.
+    TimePoint transitionFrameTime;
+    TimePoint transitionLingersUntil;
     /// The centre altitude the running transition eases to, how far along it is (the fraction its
     /// frame was last given), and the centre it was given. A new target carries on from the
-    /// altitude reached at `fromProgress`, from `from`.
+    /// altitude reached at `fromProgress`, from `from`; or, set late, from `from` at `clockStart`
+    /// on the clock.
     struct CenterAltitudeEase {
         double from = 0.0;
         double target = 0.0;
         double fromProgress = 0.0;
         double progress = 0.0;
         std::optional<LatLng> center;
-        double at(double k) const;
+        std::optional<TimePoint> clockStart;
+        double at(double k, TimePoint now) const;
     };
     std::shared_ptr<CenterAltitudeEase> centerAltitudeEase;
     std::function<bool(const TimePoint)> transitionFrameFn;

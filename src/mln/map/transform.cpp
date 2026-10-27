@@ -21,6 +21,12 @@ using namespace std::numbers;
 
 namespace mln {
 
+namespace {
+// The shortest time a transition's centre altitude takes to reach a new target
+// (Transform::retargetTransitionCenterAltitude).
+constexpr auto minimumCenterAltitudeEase = std::chrono::milliseconds(400);
+} // namespace
+
 /** Converts the given angle (in radians) to be numerically close to the anchor
  * angle, allowing it to be interpolated properly without sudden jumps. */
 namespace {
@@ -188,7 +194,7 @@ void Transform::easeTo(const CameraOptions& inputCamera, const AnimationOptions&
             double frameZoom = util::interpolate(startZoom, zoom, t);
             state.setLatLngZoom(frameLatLng, frameZoom);
             altitudeEase->progress = t;
-            state.setCenterAltitude(altitudeEase->at(t));
+            state.setCenterAltitude(altitudeEase->at(t, transitionFrameTime));
             if (bearing != startBearing) {
                 state.setBearing(util::wrap(util::interpolate(startBearing, bearing, t), -pi, pi));
             }
@@ -391,7 +397,7 @@ void Transform::flyTo(const CameraOptions& inputCamera,
             // the path it would stay where it started until the last frame, then jump.
             const double altitudeK = isClose ? k : us;
             altitudeEase->progress = altitudeK;
-            state.setCenterAltitude(altitudeEase->at(altitudeK));
+            state.setCenterAltitude(altitudeEase->at(altitudeK, transitionFrameTime));
             if (bearing != startBearing) {
                 state.setBearing(util::wrap(util::interpolate(startBearing, bearing, k), -pi, pi));
             }
@@ -630,9 +636,11 @@ void Transform::startTransition(const CameraOptions& camera,
 
     transitionStart = Clock::now();
     transitionDuration = duration;
+    transitionLingersUntil = TimePoint();
 
     transitionFrameFn = [isAnimated, animation, frame, anchor, anchorLatLng, this](const TimePoint now) {
         float t = isAnimated ? (std::chrono::duration<float>(now - transitionStart) / transitionDuration) : 1.0f;
+        transitionFrameTime = now;
         if (t >= 1.0) {
             frame(1.0);
         } else {
@@ -642,10 +650,11 @@ void Transform::startTransition(const CameraOptions& camera,
 
         if (anchor) state.moveLatLng(anchorLatLng, *anchor);
 
-        // At t = 1.0, a DidChangeAnimated notification should be sent from finish().
-        if (t < 1.0) {
+        // At t = 1.0, a DidChangeAnimated notification should be sent from finish(). A centre
+        // altitude still easing onto a late target keeps the transition going past its end.
+        if (t < 1.0 || now < transitionLingersUntil) {
             if (animation.transitionFrameFn) {
-                animation.transitionFrameFn(t);
+                animation.transitionFrameFn(std::min(t, 1.0f));
             }
             observer.onCameraIsChanging();
             return false;
@@ -742,17 +751,40 @@ void Transform::retargetTransitionCenterAltitude(double altitudeMeters) {
     }
     CenterAltitudeEase& ease = *centerAltitudeEase;
     const double k = ease.progress;
-    if (k >= 1.0 || altitudeMeters == ease.target) {
+    if (altitudeMeters == ease.target) {
+        return;
+    }
+    // With too little of the transition left, what is left of it is a frame or two (a frame that
+    // took long, as one does while new tiles arrive, all of it): heights that arrived in the last
+    // 0.2 s of a flight moved the view by hundreds of points on one frame. The rest of the way goes
+    // on the clock instead, from the altitude the last frame drew, eased in and out over
+    // minimumCenterAltitudeEase, and the transition lingers past its end until it has arrived. So
+    // does a target that changes again on the way.
+    const TimePoint now = Clock::now();
+    if (ease.clockStart || transitionStart + transitionDuration - now < minimumCenterAltitudeEase) {
+        ease.from = state.getCenterAltitude();
+        ease.target = altitudeMeters;
+        ease.clockStart = now;
+        transitionLingersUntil = now + minimumCenterAltitudeEase;
+        return;
+    }
+    if (k >= 1.0) {
         return;
     }
     // From the altitude reached at k, the rest of the way to the new target over what is left of
     // the transition.
-    ease.from = ease.at(k);
+    ease.from = ease.at(k, now);
     ease.fromProgress = k;
     ease.target = altitudeMeters;
 }
 
-double Transform::CenterAltitudeEase::at(double k) const {
+double Transform::CenterAltitudeEase::at(double k, TimePoint now) const {
+    if (clockStart) {
+        const double elapsed = std::chrono::duration<double>(now - *clockStart) /
+                               std::chrono::duration<double>(minimumCenterAltitudeEase);
+        static const util::UnitBezier easeInOut(0.42, 0.0, 0.58, 1.0);
+        return util::interpolate(from, target, easeInOut.solve(std::clamp(elapsed, 0.0, 1.0), 1e-6));
+    }
     // Kept as a fraction of what is left rather than as gl-js's extrapolated start, which a new
     // target close to the end would put out of all proportion and the last frame then misses.
     return fromProgress < 1.0 ? util::interpolate(from, target, (k - fromProgress) / (1.0 - fromProgress)) : target;
