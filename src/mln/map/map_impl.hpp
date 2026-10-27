@@ -183,8 +183,8 @@ public:
     bool settleCenterOnGround();
     /// settleCenterOnGround now, or once no transition or gesture moves the camera.
     void settleCenterOnGroundWhenStill();
-    /// Moves the centre altitude to `elevationMeters` keeping lng/lat, easing it there over
-    /// groundEaseDuration where it was held over unknown ground; false when the change is under the
+    /// Moves the centre altitude to `elevationMeters` keeping lng/lat, easing it there
+    /// (Transform::easeCenterAltitudeTo) where it was held over unknown ground; false when the change is under the
     /// sub-metre threshold, or where `elevationMeters` is NaN: the ground is unknown, and the centre
     /// is held where it is.
     bool clampCenterToTerrain(double elevationMeters);

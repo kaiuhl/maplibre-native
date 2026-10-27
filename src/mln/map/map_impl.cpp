@@ -12,18 +12,11 @@
 #include <mln/util/action_journal.hpp>
 #include <mln/util/action_journal_impl.hpp>
 #include <mln/gfx/rendering_stats.hpp>
-#include <mln/util/unitbezier.hpp>
 
-#include <chrono>
 #include <cmath>
 #include <utility>
 
 namespace mln {
-
-namespace {
-// How long a centre held over unknown ground takes to ease onto the ground once its heights arrive.
-constexpr auto groundEaseDuration = std::chrono::milliseconds(400);
-} // namespace
 
 #if !defined(NDEBUG)
 namespace {
@@ -614,11 +607,8 @@ bool Map::Impl::clampCenterToTerrain(double elevationMeters) {
         return true;
     }
     // A held centre can be far off the ground that arrives (the altitude a move set out from):
-    // eased there, from rest to rest, rather than jumped. Given the centre, so that a move with
-    // one carries on onto the latest ground as it eases (easeTransitionOntoGround).
-    AnimationOptions animation(groundEaseDuration);
-    animation.easing.emplace(0.42, 0.0, 0.58, 1.0);
-    transform.easeTo(CameraOptions().withCenter(transform.getLatLng()).withCenterAltitude(elevationMeters), animation);
+    // eased there, from rest to rest, rather than jumped.
+    transform.easeCenterAltitudeTo(elevationMeters);
     return true;
 }
 

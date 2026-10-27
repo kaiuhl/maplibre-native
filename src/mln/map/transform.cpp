@@ -768,6 +768,14 @@ void Transform::retargetTransitionCenterAltitude(double altitudeMeters) {
     ease.target = altitudeMeters;
 }
 
+void Transform::easeCenterAltitudeTo(double altitudeMeters) {
+    easeTo(CameraOptions().withCenter(getLatLng()).withCenterAltitude(altitudeMeters),
+           AnimationOptions(centerAltitudeEaseDuration));
+    if (inTransition()) {
+        centerAltitudeEase.clockStart = transitionStart;
+    }
+}
+
 bool Transform::CenterAltitudeEase::lingersAt(TimePoint now) const {
     return clockStart && now < *clockStart + centerAltitudeEaseDuration;
 }

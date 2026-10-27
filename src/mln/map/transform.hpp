@@ -130,6 +130,10 @@ public:
     /// transition lingering past its end for it. A target that changes again in those 0.4 s goes
     /// on within them. Nothing without a transition.
     void retargetTransitionCenterAltitude(double altitudeMeters);
+    /// Eases the centre altitude to `altitudeMeters` over centerAltitudeEaseDuration, keeping the
+    /// rest of the camera, as a late target is eased onto: a transition given the centre, so that
+    /// a new target on the way goes on within the same time (retargetTransitionCenterAltitude).
+    void easeCenterAltitudeTo(double altitudeMeters);
 
     // Gesture
     void setGestureInProgress(bool);
