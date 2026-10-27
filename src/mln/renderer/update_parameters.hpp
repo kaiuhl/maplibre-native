@@ -69,6 +69,11 @@ public:
     // (ABOVE-GROUND ...). Off by default; the per-frame elevation sampling is skipped entirely
     // when off, so it has no cost unless explicitly enabled (Map::setDebugAboveGroundLog).
     bool debugAboveGroundLog = false;
+    /// The centre and zoom a running animated move arrives at (Transform::getTransitionCenter), or
+    /// none. With 3D terrain, the DEM source loads the heights there as the move sets out
+    /// (TileParameters::destinationCenter).
+    std::optional<LatLng> transitionCenter;
+    double transitionZoom = 0;
 };
 
 } // namespace mln

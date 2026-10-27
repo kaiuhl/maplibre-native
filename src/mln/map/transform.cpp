@@ -177,7 +177,8 @@ void Transform::easeTo(const CameraOptions& inputCamera, const AnimationOptions&
     const auto altitudeEase = std::make_shared<CenterAltitudeEase>(
         CenterAltitudeEase{.from = startCenterAlt,
                            .target = centerAlt,
-                           .center = camera.center ? std::optional<LatLng>(latLng) : std::nullopt});
+                           .center = camera.center ? std::optional<LatLng>(latLng) : std::nullopt,
+                           .zoom = zoom});
 
     startTransition(
         camera,
@@ -362,7 +363,8 @@ void Transform::flyTo(const CameraOptions& inputCamera,
     const auto altitudeEase = std::make_shared<CenterAltitudeEase>(
         CenterAltitudeEase{.from = startCenterAlt,
                            .target = centerAlt,
-                           .center = camera.center ? std::optional<LatLng>(latLng) : std::nullopt});
+                           .center = camera.center ? std::optional<LatLng>(latLng) : std::nullopt,
+                           .zoom = zoom});
 
     startTransition(
         camera,
@@ -734,6 +736,10 @@ void Transform::cancelTransitions() {
 
 std::optional<LatLng> Transform::getTransitionCenter() const {
     return inTransition() && centerAltitudeEase ? centerAltitudeEase->center : std::nullopt;
+}
+
+std::optional<double> Transform::getTransitionZoom() const {
+    return getTransitionCenter() ? std::optional<double>(centerAltitudeEase->zoom) : std::nullopt;
 }
 
 void Transform::retargetTransitionCenterAltitude(double altitudeMeters) {

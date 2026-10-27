@@ -3,9 +3,11 @@
 #include <mln/map/mode.hpp>
 #include <mln/actor/scheduler.hpp>
 #include <mln/util/feature.hpp>
+#include <mln/util/geo.hpp>
 
 #include <memory>
 #include <numbers>
+#include <optional>
 
 #include <mapbox/std/weak.hpp>
 
@@ -56,6 +58,11 @@ public:
     /// distance LOD) can bind a DEM tile that covers them whole; where none has loaded,
     /// RenderTerrain::elevationSampler reads the deeper tiles point by point.
     uint8_t retainAncestorLevels = 0;
+    /// The centre and zoom a running animated move arrives at, given to the 3D-terrain DEM source
+    /// alone. It also loads the tiles under that centre from the start of the move (see
+    /// TilePyramid::update), so that the heights there have usually arrived when the move ends.
+    std::optional<LatLng> destinationCenter;
+    double destinationZoom = 0;
 };
 
 } // namespace mln

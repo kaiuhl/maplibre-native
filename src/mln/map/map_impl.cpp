@@ -190,7 +190,9 @@ void Map::Impl::onUpdate() {
                                .tileLodMode = tileLodMode,
                                .terrainLoadMode = terrainLoadMode,
                                .terrainSkirtLength = terrainSkirtLength,
-                               .debugAboveGroundLog = debugAboveGroundLog};
+                               .debugAboveGroundLog = debugAboveGroundLog,
+                               .transitionCenter = transform.getTransitionCenter(),
+                               .transitionZoom = transform.getTransitionZoom().value_or(0.0)};
 
     rendererFrontend.update(std::make_shared<UpdateParameters>(std::move(params)));
 }

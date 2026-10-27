@@ -120,6 +120,9 @@ public:
     /// The centre a running transition was given to arrive at, as it arrives there; nullopt without
     /// a transition or for one with no centre of its own (moveBy, rotateBy, a zoom around an anchor).
     std::optional<LatLng> getTransitionCenter() const;
+    /// The zoom a running transition with a centre of its own arrives at; nullopt where
+    /// getTransitionCenter is.
+    std::optional<double> getTransitionZoom() const;
     /// Moves the centre altitude a running transition arrives at to `altitudeMeters`, carrying on
     /// from the altitude it has reached so that nothing jumps (gl-js's Camera._updateElevation).
     /// Nothing without a transition, or on its last frame.
@@ -167,7 +170,7 @@ private:
     TimePoint transitionStart;
     Duration transitionDuration;
     /// The centre altitude the running transition eases to, how far along it is (the fraction its
-    /// frame was last given), and the centre it was given. A new target carries on from the
+    /// frame was last given), and the centre and zoom it was given. A new target carries on from the
     /// altitude reached at `fromProgress`, from `from`.
     struct CenterAltitudeEase {
         double from = 0.0;
@@ -175,6 +178,7 @@ private:
         double fromProgress = 0.0;
         double progress = 0.0;
         std::optional<LatLng> center;
+        double zoom = 0.0;
         double at(double k) const;
     };
     std::shared_ptr<CenterAltitudeEase> centerAltitudeEase;

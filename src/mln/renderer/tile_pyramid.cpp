@@ -8,6 +8,7 @@
 #include <mln/actor/scheduler.hpp>
 #include <mln/util/tile_cover.hpp>
 #include <mln/util/tile_range.hpp>
+#include <mln/util/projection.hpp>
 #include <mln/util/enum.hpp>
 #include <mln/util/logging.hpp>
 
@@ -153,6 +154,45 @@ void TilePyramid::update(const std::vector<Immutable<style::LayerProperties>>& l
         }
     }
 
+    // The tiles under the centre a running animated move arrives at (destinationCenter, given to the
+    // 3D-terrain DEM source alone): the one at the zoom the source prefetches at, coarser and
+    // first, and the one its cover will use there. Requested only once the view reached them,
+    // they arrived seconds after the move ended, and the heights there with them. Requested as the
+    // move sets out, they are usually in by the time it ends, and the cover there takes them over.
+    std::vector<OverscaledTileID> destinationTiles;
+    if (parameters.destinationCenter && parameters.mode == MapMode::Continuous) {
+        const double destinationZoom = util::clamp<double>(parameters.destinationZoom + parameters.tileLodZoomShift,
+                                                           parameters.transformState.getMinZoom(),
+                                                           parameters.transformState.getMaxZoom());
+        const int32_t destinationOverscaledZoom = util::coveringZoomLevel(destinationZoom, type, tileSize);
+        if (std::cmp_greater_equal(destinationOverscaledZoom, zoomRange.min)) {
+            // The zooms the cover there will use, worked out as for the view above
+            const int32_t destinationIdealZoom = std::min<int32_t>(zoomRange.max, destinationOverscaledZoom);
+            const int32_t destinationTileZoom = type == SourceType::Raster ? destinationIdealZoom
+                                                                           : destinationOverscaledZoom;
+            const uint8_t prefetchZoomDelta = sourcePrefetchZoomDelta ? *sourcePrefetchZoomDelta
+                                                                      : parameters.prefetchZoomDelta;
+            const int32_t destinationPanZoom = std::max<int32_t>(destinationTileZoom - prefetchZoomDelta,
+                                                                 zoomRange.min);
+            const auto tileUnder = [&](int32_t z, int32_t overscaledZ) {
+                // Tile units (world size 2^z); a centre past the antimeridian is in another wrap.
+                const Point<double> point = Projection::project(*parameters.destinationCenter, z);
+                const double tilesAcross = std::pow(2.0, z);
+                const double wrap = std::floor(point.x / tilesAcross);
+                return OverscaledTileID(
+                    static_cast<uint8_t>(overscaledZ),
+                    static_cast<int16_t>(wrap),
+                    static_cast<uint8_t>(z),
+                    static_cast<uint32_t>(util::clamp(point.x - wrap * tilesAcross, 0.0, tilesAcross - 1.0)),
+                    static_cast<uint32_t>(util::clamp(point.y, 0.0, tilesAcross - 1.0)));
+            };
+            if (prefetchZoomDelta && destinationPanZoom < destinationIdealZoom) {
+                destinationTiles.push_back(tileUnder(destinationPanZoom, destinationPanZoom));
+            }
+            destinationTiles.push_back(tileUnder(destinationIdealZoom, destinationTileZoom));
+        }
+    }
+
     // Stores a list of all the tiles that we're definitely going to retain.
     // There are two kinds of tiles we need: the ideal tiles determined by the
     // tile cover. They may not yet be in use because they're still loading. In
@@ -187,6 +227,9 @@ void TilePyramid::update(const std::vector<Immutable<style::LayerProperties>>& l
         const bool variableZoom = parameters.tileLodMode == TileLodMode::Distance ||
                                   parameters.tileLodMode == TileLodMode::Adaptive;
         int32_t maxZoom = variableZoom ? zoomRange.max : std::min(tileZoom, static_cast<int32_t>(zoomRange.max));
+        if (!destinationTiles.empty()) {
+            maxZoom = std::max<int32_t>(maxZoom, destinationTiles.back().canonical.z);
+        }
         tileRange = util::TileRange::fromLatLngBounds(*bounds, zoomRange.min, maxZoom);
     }
     auto createTileFn = [&](const OverscaledTileID& tileID) -> Tile* {
@@ -202,6 +245,21 @@ void TilePyramid::update(const std::vector<Immutable<style::LayerProperties>>& l
 
         return tiles.emplace(tileID, std::move(tile)).first->second.get();
     };
+
+    // Loaded and kept, not rendered: the cover where the move ends renders them. Retained ahead of
+    // the cover, whose first hold on a tile is the one that counts: on the way, it holds one still
+    // loading as an optional stand-in for its own tiles below it, which cancelled the request every
+    // frame. Not through updateRenderables, which would hold the ancestors of one still loading as
+    // optional the same way, before the cover could require them.
+    for (const auto& id : destinationTiles) {
+        Tile* tile = getTileFn(id);
+        if (!tile) {
+            tile = createTileFn(id);
+        }
+        if (tile) {
+            retainTileFn(*tile, TileNecessity::Required);
+        }
+    }
 
     // Keep ancestors of the ideal cover that are already loaded (but not rendered) when asked to -
     // see TileParameters::retainAncestorLevels. Never request one: that fetched up to eight extra
