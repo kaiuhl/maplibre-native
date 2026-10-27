@@ -175,14 +175,13 @@ private:
 
     TimePoint transitionStart;
     Duration transitionDuration;
-    /// The time the running transition's frame is drawing, and until when it runs past its end for
-    /// a centre altitude still on its way to a late target.
+    /// The time the running transition's frame is drawing.
     TimePoint transitionFrameTime;
-    TimePoint transitionLingersUntil;
     /// The centre altitude the running transition eases to, how far along it is (the fraction its
     /// frame was last given), and the centre it was given. A new target carries on from the
     /// altitude reached at `fromProgress`, from `from`; or, set late, from `from` at `clockStart`
-    /// on the clock.
+    /// on the clock, over centerAltitudeEaseDuration, the transition lingering past its end until
+    /// then (lingersAt).
     struct CenterAltitudeEase {
         double from = 0.0;
         double target = 0.0;
@@ -191,6 +190,7 @@ private:
         std::optional<LatLng> center;
         std::optional<TimePoint> clockStart;
         double at(double k, TimePoint now) const;
+        bool lingersAt(TimePoint now) const;
     };
     CenterAltitudeEase centerAltitudeEase;
     /// The running transition's centre altitude at progress `k`, which a new target carries on from.

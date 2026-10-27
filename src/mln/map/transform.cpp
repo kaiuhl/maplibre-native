@@ -21,12 +21,6 @@ using namespace std::numbers;
 
 namespace mln {
 
-namespace {
-// The shortest time a transition's centre altitude takes to reach a new target
-// (Transform::retargetTransitionCenterAltitude).
-constexpr auto minimumCenterAltitudeEase = std::chrono::milliseconds(400);
-} // namespace
-
 /** Converts the given angle (in radians) to be numerically close to the anchor
  * angle, allowing it to be interpolated properly without sudden jumps. */
 namespace {
@@ -630,7 +624,6 @@ void Transform::startTransition(const CameraOptions& camera,
 
     transitionStart = Clock::now();
     transitionDuration = duration;
-    transitionLingersUntil = TimePoint();
 
     transitionFrameFn = [isAnimated, animation, frame, anchor, anchorLatLng, this](const TimePoint now) {
         float t = isAnimated ? (std::chrono::duration<float>(now - transitionStart) / transitionDuration) : 1.0f;
@@ -646,7 +639,7 @@ void Transform::startTransition(const CameraOptions& camera,
 
         // At t = 1.0, a DidChangeAnimated notification should be sent from finish(). A centre
         // altitude still easing onto a late target keeps the transition going past its end.
-        if (t < 1.0 || now < transitionLingersUntil) {
+        if (t < 1.0 || centerAltitudeEase.lingersAt(now)) {
             if (animation.transitionFrameFn) {
                 animation.transitionFrameFn(std::min(t, 1.0f));
             }
@@ -751,15 +744,14 @@ void Transform::retargetTransitionCenterAltitude(double altitudeMeters) {
     // With too little of the transition left, what is left of it is a frame or two (a frame that
     // took long, as one does while new tiles arrive, all of it): heights that arrived in the last
     // 0.2 s of a flight moved the view by hundreds of points on one frame. The rest of the way goes
-    // on the clock instead, from the altitude the last frame drew, eased in and out over
-    // minimumCenterAltitudeEase, and the transition lingers past its end until it has arrived. So
-    // does a target that changes again on the way.
+    // on the clock instead, from the altitude the last frame drew, over centerAltitudeEaseDuration,
+    // and the transition lingers past its end until it has arrived. So does a target that changes
+    // again on the way.
     const TimePoint now = Clock::now();
-    if (ease.clockStart || transitionStart + transitionDuration - now < minimumCenterAltitudeEase) {
+    if (ease.clockStart || transitionStart + transitionDuration - now < centerAltitudeEaseDuration) {
         ease.from = state.getCenterAltitude();
         ease.target = altitudeMeters;
         ease.clockStart = now;
-        transitionLingersUntil = now + minimumCenterAltitudeEase;
         return;
     }
     if (k >= 1.0) {
@@ -772,6 +764,10 @@ void Transform::retargetTransitionCenterAltitude(double altitudeMeters) {
     ease.target = altitudeMeters;
 }
 
+bool Transform::CenterAltitudeEase::lingersAt(TimePoint now) const {
+    return clockStart && now < *clockStart + centerAltitudeEaseDuration;
+}
+
 double Transform::transitionCenterAltitude(double k) {
     centerAltitudeEase.progress = k;
     return centerAltitudeEase.at(k, transitionFrameTime);
@@ -780,9 +776,8 @@ double Transform::transitionCenterAltitude(double k) {
 double Transform::CenterAltitudeEase::at(double k, TimePoint now) const {
     if (clockStart) {
         const double elapsed = std::chrono::duration<double>(now - *clockStart) /
-                               std::chrono::duration<double>(minimumCenterAltitudeEase);
-        static const util::UnitBezier easeInOut(0.42, 0.0, 0.58, 1.0);
-        return util::interpolate(from, target, easeInOut.solve(std::clamp(elapsed, 0.0, 1.0), 1e-6));
+                               std::chrono::duration<double>(centerAltitudeEaseDuration);
+        return util::interpolate(from, target, centerAltitudeEasing.solve(std::clamp(elapsed, 0.0, 1.0), 1e-6));
     }
     // Kept as a fraction of what is left rather than as gl-js's extrapolated start, which a new
     // target close to the end would put out of all proportion and the last frame then misses.
