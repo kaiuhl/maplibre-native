@@ -1,5 +1,7 @@
 #include <sstream>
 #include <map>
+#include <memory>
+#include <vector>
 
 #include <mln/platform/settings.hpp>
 #include <mln/storage/file_source_manager.hpp>
@@ -57,6 +59,8 @@ using namespace rapidjson;
 
 using AsyncCallback = std::function<void(std::unique_ptr<Response::Error>)>;
 using AsyncTileCallback = std::function<void(std::pair<uint64_t, uint32_t>, std::unique_ptr<Response::Error>)>;
+using DirectoryEntries = std::shared_ptr<const std::vector<pmtiles::entryv3>>;
+using AsyncDirectoryCallback = std::function<void(const DirectoryEntries&, std::unique_ptr<Response::Error>)>;
 
 class PMTilesFileSource::Impl {
 public:
@@ -227,7 +231,8 @@ private:
     std::shared_ptr<FileSource> fileSource;
     std::map<std::string, pmtiles::headerv3> header_cache;
     std::map<std::string, std::string> metadata_cache;
-    std::map<std::string, std::map<std::string, std::vector<pmtiles::entryv3>>> directory_cache;
+    std::map<std::string, std::map<std::string, DirectoryEntries>> directory_cache;
+    // Cache keys by archive, least recently used first. Each key appears once.
     std::map<std::string, std::vector<std::string>> directory_cache_control;
     std::map<AsyncRequest*, std::unique_ptr<AsyncRequest>> tasks;
 
@@ -470,54 +475,60 @@ private:
             });
     }
 
-    void storeDirectory(const std::string& url,
-                        uint64_t directoryOffset,
-                        uint64_t directoryLength,
-                        const std::string& directoryData) {
-        if (!directory_cache.contains(url)) {
-            directory_cache.emplace(url, std::map<std::string, std::vector<pmtiles::entryv3>>());
-            directory_cache_control.emplace(url, std::vector<std::string>());
+    DirectoryEntries findDirectory(const std::string& url, const std::string& directory_cache_key) const {
+        const auto archive = directory_cache.find(url);
+        if (archive == directory_cache.end()) {
+            return nullptr;
         }
 
-        std::string directory_cache_key = url + "|" + std::to_string(directoryOffset) + "|" +
-                                          std::to_string(directoryLength);
-        directory_cache.at(url).emplace(directory_cache_key, pmtiles::deserialize_directory(directoryData));
-        directory_cache_control.at(url).emplace_back(directory_cache_key);
+        const auto directory = archive->second.find(directory_cache_key);
+        return directory == archive->second.end() ? nullptr : directory->second;
+    }
 
-        if (directory_cache_control.at(url).size() > MAX_DIRECTORY_CACHE_ENTRIES) {
-            directory_cache.at(url).erase(directory_cache_control.at(url).front());
-            directory_cache_control.at(url).erase(directory_cache_control.at(url).begin());
+    // Makes a cached directory the most recently used, then evicts the least recently used ones over
+    // the limit. Concurrent requests can each load and store the same directory, so its key moves to
+    // the back instead of being listed again: a stale listing would evict the directory while it's
+    // still in use, even straight after storing it.
+    void touchDirectory(const std::string& url, const std::string& directory_cache_key) {
+        auto& control = directory_cache_control[url];
+        std::erase(control, directory_cache_key);
+        control.push_back(directory_cache_key);
+
+        while (control.size() > MAX_DIRECTORY_CACHE_ENTRIES) {
+            directory_cache[url].erase(control.front());
+            control.erase(control.begin());
         }
     }
 
+    DirectoryEntries storeDirectory(const std::string& url,
+                                    const std::string& directory_cache_key,
+                                    const std::string& directoryData) {
+        auto directory = std::make_shared<const std::vector<pmtiles::entryv3>>(
+            pmtiles::deserialize_directory(directoryData));
+        directory_cache[url].insert_or_assign(directory_cache_key, directory);
+        touchDirectory(url, directory_cache_key);
+        return directory;
+    }
+
+    // Answers with the directory itself, so the caller never has to find it in the cache, from which
+    // it may have been evicted.
     void getDirectory(const std::string& url,
                       AsyncRequest* req,
                       uint64_t directoryOffset,
                       uint32_t directoryLength,
-                      AsyncCallback callback) {
+                      AsyncDirectoryCallback callback) {
         std::string directory_cache_key = url + "|" + std::to_string(directoryOffset) + "|" +
                                           std::to_string(directoryLength);
 
-        if (directory_cache.contains(url) && directory_cache.at(url).contains(directory_cache_key)) {
-            if (directory_cache_control.at(url).back() != directory_cache_key) {
-                directory_cache_control.at(url).emplace_back(directory_cache_key);
-
-                for (auto it = directory_cache_control.at(url).begin(); it != directory_cache_control.at(url).end();
-                     ++it) {
-                    if (*it == directory_cache_key) {
-                        directory_cache_control.at(url).erase(it);
-                        break;
-                    }
-                }
-            }
-
-            callback(std::unique_ptr<Response::Error>());
+        if (DirectoryEntries directory = findDirectory(url, directory_cache_key)) {
+            touchDirectory(url, directory_cache_key);
+            callback(directory, {});
             return;
         }
 
         getHeader(url, req, [=, this](std::unique_ptr<Response::Error> error) {
             if (error) {
-                callback(std::move(error));
+                callback(nullptr, std::move(error));
                 return;
             }
 
@@ -529,9 +540,10 @@ private:
 
             tasks[req] = getFileSource()->request(resource, [=, this](const Response& response) {
                 if (response.error) {
-                    callback(std::make_unique<Response::Error>(
-                        response.error->reason,
-                        std::string("Error fetching PMTiles directory: ") + response.error->message));
+                    callback(nullptr,
+                             std::make_unique<Response::Error>(
+                                 response.error->reason,
+                                 std::string("Error fetching PMTiles directory: ") + response.error->message));
 
                     return;
                 }
@@ -541,10 +553,13 @@ private:
                 }
 
                 if (!response.data) {
-                    callback(std::make_unique<Response::Error>(Response::Error::Reason::Other,
+                    callback(nullptr,
+                             std::make_unique<Response::Error>(Response::Error::Reason::Other,
                                                                "PMTiles directory response has no data"));
                     return;
                 }
+
+                DirectoryEntries directory;
 
                 try {
                     std::string directoryData = *response.data;
@@ -553,14 +568,18 @@ private:
                         directoryData = util::decompress(directoryData);
                     }
 
-                    storeDirectory(url, directoryOffset, directoryLength, directoryData);
-
-                    callback(std::unique_ptr<Response::Error>());
+                    directory = storeDirectory(url, directory_cache_key, directoryData);
                 } catch (const std::exception& e) {
-                    callback(std::make_unique<Response::Error>(
-                        Response::Error::Reason::Other,
-                        std::string(std::string("Error parsing PMTiles directory: ") + e.what())));
+                    callback(nullptr,
+                             std::make_unique<Response::Error>(
+                                 Response::Error::Reason::Other,
+                                 std::string(std::string("Error parsing PMTiles directory: ") + e.what())));
+                    return;
                 }
+
+                // Outside the try: an exception further along the lookup isn't a parse error, and catching
+                // it here would answer the caller a second time.
+                callback(directory, {});
             });
         });
     }
@@ -586,17 +605,15 @@ private:
             req,
             directoryOffset,
             directoryLength,
-            [=, this](std::unique_ptr<Response::Error> error) { // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
+            [=, this](const DirectoryEntries& directory,
+                      std::unique_ptr<Response::Error> error) { // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
                 if (error) {
                     callback(std::make_pair(0, 0), std::move(error));
                     return;
                 }
 
                 pmtiles::headerv3 header = header_cache.at(url);
-                std::vector<pmtiles::entryv3> directory = directory_cache.at(url).at(
-                    url + "|" + std::to_string(directoryOffset) + "|" + std::to_string(directoryLength));
-
-                pmtiles::entryv3 entry = pmtiles::find_tile(directory, tileID);
+                pmtiles::entryv3 entry = pmtiles::find_tile(*directory, tileID);
 
                 if (entry.length > 0) {
                     if (entry.run_length > 0) {
