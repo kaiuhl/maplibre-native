@@ -159,6 +159,9 @@ public:
     /// The ground under the centre as it is now: the map-side heights where they have it, else the
     /// height the renderer last reported.
     double groundUnderCenter() const;
+    /// With the clamp on, has a running transition given a centre arrive at the ground there, from
+    /// the map-side heights as they are now (Transform::retargetTransitionCenterAltitude).
+    void easeTransitionOntoGround();
     /// Height of the ground the line of sight from the camera through the centre meets first,
     /// from the map-side heights: where setCenterAltitudeKeepingView puts the centre on the
     /// terrain. Nullopt without heights there, or with the camera inside the terrain.

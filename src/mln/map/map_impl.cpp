@@ -122,6 +122,8 @@ void Map::Impl::onUpdate() {
 
     TimePoint timePoint = mode == MapMode::Continuous ? Clock::now() : Clock::time_point::max();
 
+    // Before the frame, so that it lands on the latest ground.
+    easeTransitionOntoGround();
     transform.updateTransitions(timePoint);
 
     // Terrain removed: a centre that gestures anchored on it (or the clamp held there) would stay
@@ -476,6 +478,26 @@ void Map::Impl::onTerrainCenterElevationChanged(double elevationMeters) {
     }
     if (clampCenterToTerrain(elevationMeters)) {
         onUpdate();
+    }
+}
+
+void Map::Impl::easeTransitionOntoGround() {
+    // An animated move to a centre was given the altitude of the ground there as far as anyone
+    // knew when it started, the current one where that hadn't loaded. It eases the centre onto
+    // the ground there as the heights for it arrive, as gl-js's Camera._updateElevation does, so
+    // that the clamp has nothing left to move once the move ends: left at the altitude it was
+    // given, the camera jumped onto ground that loaded during the move on the frame it ended.
+    if (!centerClampedToGround || !transitionNamedCenter || !terrainElevationIndex || !style->impl->getTerrain()) {
+        return;
+    }
+    auto center = transform.getTransitionCenter();
+    if (!center) {
+        return;
+    }
+    // Unwrapped for the shortest path from the centre, as groundOnLineOfSight does.
+    center->unwrapForShortestPath(transform.getLatLng());
+    if (const auto ground = terrainElevationIndex->getElevation(*center)) {
+        transform.retargetTransitionCenterAltitude(*ground);
     }
 }
 

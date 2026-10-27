@@ -496,8 +496,11 @@ struct TerrainTransitionTest {
               MapObserver::nullObserver(),
               fileSource,
               MapOptions().withMapMode(MapMode::Continuous).withSize(frontend.getSize())) {
-        fileSource->tileResponse = [this](const Resource& resource) {
+        fileSource->tileResponse = [this](const Resource& resource) -> std::optional<Response> {
             const bool west = resource.tileData && resource.tileData->z == 2 && resource.tileData->x == 1;
+            if (west && holdWest) {
+                return std::nullopt; // still on its way
+            }
             Response res;
             res.data = std::make_shared<std::string>(west ? highTile : lowTile);
             return res;
@@ -577,6 +580,8 @@ struct TerrainTransitionTest {
     }
 
     const LatLng westTarget{47.2692, -30.0};
+    // While set, the plateau's tiles don't arrive.
+    bool holdWest = false;
     vec3 eyeAtEnd{};
     LatLng centerAtEnd;
 };
@@ -670,6 +675,49 @@ TEST(TerrainCamera, TurnDuringATransitionKeepsTheCamera) {
     EXPECT_NEAR(eyeHeightAfterTurn, eyeHeightBeforeTurn, mercatorMetre);
     EXPECT_NEAR(test.eye()[2], eyeHeightBeforeTurn, mercatorMetre);
     EXPECT_NEAR(*test.map.getCameraOptions({}).centerAltitude, westPlateauMeters, 5.0);
+}
+
+// An animated move to a centre over ground whose heights arrive part-way through it, given the
+// height it set out from as the app gives one where the ground ahead hasn't loaded. It eases the
+// centre onto that ground as the heights arrive, as gl-js's Camera._updateElevation does, and
+// arrives on it: the clamp has nothing left to do, where it lifted the camera 1000 m on the frame
+// the move ended.
+TEST(TerrainCamera, EaseOntoGroundLoadedDuringTheMoveEndsWithoutAJump) {
+    TerrainTransitionTest test;
+    test.holdWest = true;
+    ASSERT_TRUE(test.settleOnPlateau());
+
+    bool released = false;
+    double releasedAt = 0.0;
+    double largestStep = 0.0;
+    double previous = test.eye()[2];
+    ASSERT_TRUE(test.runTransition(
+        [&](const AnimationOptions& animation) {
+            test.map.easeTo(CameraOptions().withCenter(test.westTarget).withCenterAltitude(plateauMeters), animation);
+        },
+        [&](bool finished) {
+            const double height = test.eye()[2];
+            if (!finished) {
+                largestStep = std::max(largestStep, std::abs(height - previous));
+            }
+            previous = height;
+            // A third of the way there, the plateau's heights arrive.
+            const double longitude = test.map.getCameraOptions({}).center->longitude();
+            if (!released && longitude < 0.0) {
+                test.holdWest = false;
+                released = true;
+                releasedAt = longitude;
+            }
+        }));
+    ASSERT_TRUE(released);
+    ASSERT_GT(releasedAt, -25.0);
+
+    test.expectEyeAtEnd();
+    const auto camera = test.map.getCameraOptions({});
+    EXPECT_NEAR(*camera.centerAltitude, westPlateauMeters, 5.0);
+    EXPECT_NEAR(camera.center->longitude(), test.westTarget.longitude(), 1e-6);
+    // Eased: a 1000 m rise over the rest of the move, no step of it a jump.
+    EXPECT_LT(largestStep, 400.0 * mercatorMetre);
 }
 
 // The same for a free camera set while a transition runs: it stays where it was put.
