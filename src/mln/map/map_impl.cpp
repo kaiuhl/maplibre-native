@@ -147,7 +147,7 @@ void Map::Impl::onUpdate() {
         centerAwaitingTerrainAnchor = false;
         if (centerClampedToGround && style->impl->getTerrain() && !std::isnan(terrainCenterElevation) &&
             (transitionNamedCenter || !anchorCenterOnLineOfSight())) {
-            clampCenterToTerrain(terrainCenterElevation);
+            clampCenterToTerrain(groundUnderCenter());
         }
     }
 
@@ -507,6 +507,17 @@ bool Map::Impl::anchorCenterOnLineOfSight() {
                       setCenterAltitudeKeepingView(*ground));
 }
 
+double Map::Impl::groundUnderCenter() const {
+    // The height reported was sampled under the centre of the last frame drawn, which a jump since
+    // may have moved anywhere; the map-side heights answer for the centre as it is now.
+    if (terrainElevationIndex) {
+        if (const auto ground = terrainElevationIndex->getElevation(transform.getLatLng())) {
+            return *ground;
+        }
+    }
+    return terrainCenterElevation;
+}
+
 bool Map::Impl::clampCenterToTerrain(double elevationMeters) {
     // Sub-metre differences are the terrain cover shifting under a camera that just moved,
     // not the ground actually changing height; acting on them would chase itself.
@@ -523,6 +534,9 @@ bool Map::Impl::clampCenterToTerrain(double elevationMeters) {
 void Map::Impl::jumpTo(const CameraOptions& camera) {
     cameraMutated = true;
     settleCenterAwaitingSeaLevel();
+    // A jump cancels a running transition, and the camera it sets decides what the clamp keeps
+    // once heights arrive (onUpdate): a centre given, or else the camera.
+    transitionNamedCenter = camera.center.has_value();
     transform.jumpTo(camera);
     onUpdate();
 }

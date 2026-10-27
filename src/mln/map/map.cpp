@@ -88,6 +88,7 @@ void Map::renderStill(const CameraOptions& camera, MapDebugOptions debugOptions,
     impl->cameraMutated = true;
     impl->debugOptions = debugOptions;
     impl->settleCenterAwaitingSeaLevel();
+    impl->transitionNamedCenter = camera.center.has_value();
     impl->transform.jumpTo(camera);
     renderStill(std::move(callback));
 }
@@ -628,6 +629,8 @@ void Map::dumpDebugLogs() const {
 
 void Map::setFreeCameraOptions(const FreeCameraOptions& camera) {
     impl->settleCenterAwaitingSeaLevel();
+    // A camera put where it is, not a centre: the clamp keeps it (onUpdate).
+    impl->transitionNamedCenter = false;
     impl->transform.setFreeCameraOptions(camera);
     impl->cameraMutated = true;
     impl->onUpdate();
@@ -701,6 +704,8 @@ bool Map::setCenterAltitudeKeepingView(double altitudeMeters) {
     // Like every camera entry point, run a return to sea level that is still waiting first:
     // run later, it would move the camera this sets.
     impl->settleCenterAwaitingSeaLevel();
+    // Keeps the view, so a transition this cuts short leaves no centre for the clamp to keep.
+    impl->transitionNamedCenter = false;
     const bool moved = impl->setCenterAltitudeKeepingView(altitudeMeters);
     if (moved) {
         impl->cameraMutated = true;

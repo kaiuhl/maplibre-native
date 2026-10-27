@@ -645,6 +645,82 @@ TEST(TerrainCamera, ClampAfterACancelledTransitionKeepsTheCamera) {
     EXPECT_NEAR(*test.map.getCameraOptions({}).centerAltitude, westPlateauMeters, 5.0);
 }
 
+// A camera set without a transition (a turn here) cancels a running one too, and the height the
+// clamp was holding for that transition's end must not then move the camera the app just set: the
+// turn keeps the eye's height, and so does the clamp, putting the centre on the ground along the
+// line of sight.
+TEST(TerrainCamera, TurnDuringATransitionKeepsTheCamera) {
+    TerrainTransitionTest test;
+    ASSERT_TRUE(test.settleOnPlateau());
+
+    bool turned = false;
+    double eyeHeightBeforeTurn = 0.0;
+    double eyeHeightAfterTurn = 0.0;
+    ASSERT_TRUE(test.easeWest([&](bool finished) {
+        // Well over the 2000 m plateau, so the clamp has a new height waiting.
+        if (!finished && !turned && test.map.getCameraOptions({}).center->longitude() < -5.0) {
+            eyeHeightBeforeTurn = test.eye()[2];
+            test.map.jumpTo(CameraOptions().withBearing(*test.map.getCameraOptions({}).bearing + 10.0));
+            eyeHeightAfterTurn = test.eye()[2];
+            turned = true;
+        }
+    }));
+    ASSERT_TRUE(turned);
+
+    EXPECT_NEAR(eyeHeightAfterTurn, eyeHeightBeforeTurn, mercatorMetre);
+    EXPECT_NEAR(test.eye()[2], eyeHeightBeforeTurn, mercatorMetre);
+    EXPECT_NEAR(*test.map.getCameraOptions({}).centerAltitude, westPlateauMeters, 5.0);
+}
+
+// The same for a free camera set while a transition runs: it stays where it was put.
+TEST(TerrainCamera, FreeCameraSetDuringATransitionIsKept) {
+    TerrainTransitionTest test;
+    ASSERT_TRUE(test.settleOnPlateau());
+
+    bool set = false;
+    vec3 eyeSet{};
+    ASSERT_TRUE(test.easeWest([&](bool finished) {
+        if (!finished && !set && test.map.getCameraOptions({}).center->longitude() < -5.0) {
+            const FreeCameraOptions camera = test.map.getFreeCameraOptions();
+            eyeSet = *camera.position;
+            test.map.setFreeCameraOptions(camera);
+            set = true;
+        }
+    }));
+    ASSERT_TRUE(set);
+
+    const vec3 actual = test.eye();
+    for (int i = 0; i < 3; ++i) {
+        EXPECT_NEAR(actual[i], eyeSet[i], mercatorMetre) << "axis " << i;
+    }
+}
+
+// A jump to a centre while a transition runs arrives over other ground than the height the clamp
+// was holding for the transition: the clamp puts that centre on the ground under it, not at the
+// held height.
+TEST(TerrainCamera, JumpToACentreDuringATransitionUsesTheGroundThere) {
+    TerrainTransitionTest test;
+    ASSERT_TRUE(test.settleOnPlateau());
+
+    const LatLng east{47.2692, 20.0};
+    bool jumped = false;
+    double altitudeAfterJump = 0.0;
+    ASSERT_TRUE(test.easeWest([&](bool finished) {
+        if (!finished && !jumped && test.map.getCameraOptions({}).center->longitude() < -5.0) {
+            test.map.jumpTo(CameraOptions().withCenter(east));
+            altitudeAfterJump = test.altitude();
+            jumped = true;
+        }
+    }));
+    ASSERT_TRUE(jumped);
+
+    EXPECT_NEAR(altitudeAfterJump, plateauMeters, 5.0);
+    const auto camera = test.map.getCameraOptions({});
+    EXPECT_NEAR(*camera.centerAltitude, plateauMeters, 5.0);
+    EXPECT_NEAR(camera.center->longitude(), east.longitude(), 1e-9);
+    EXPECT_NEAR(camera.center->latitude(), east.latitude(), 1e-9);
+}
+
 // A terrain removed while the clamp waits for a transition takes the waiting height with it:
 // once the transition ends, the centre returns to sea level and the clamp does not raise it
 // back onto ground that is no longer drawn.
