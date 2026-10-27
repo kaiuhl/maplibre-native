@@ -505,7 +505,7 @@ bool Map::Impl::settleCenterOnGround() {
     // A centre the camera was set to (a jump, or an animated move run to its end) is put on the
     // ground under it, keeping it and the zoom: the camera moves onto that ground.
     if (cameraSetToCenter) {
-        return clampCenterToTerrain(groundUnderCenter());
+        return clampCenterToTerrain(groundUnderCenter(), cameraSetToCenterAnimated);
     }
     // After a move relative to the view (a fling, a drag, a pinch, an animation cut short) the
     // camera stays, and the centre moves along the line of sight onto the ground it meets, the zoom
@@ -584,7 +584,7 @@ std::optional<double> Map::Impl::groundAt(LatLng latLng) const {
     return terrainElevationIndex->getElevation(latLng);
 }
 
-bool Map::Impl::clampCenterToTerrain(double elevationMeters) {
+bool Map::Impl::clampCenterToTerrain(double elevationMeters, bool ease) {
     // No DEM tile covers the centre yet (a move that ends over ground whose heights are still on
     // their way): the ground there is unknown. Put at sea level, the whole view dove hundreds of
     // points and jumped back up once the heights arrived, seconds later. The centre stays at the
@@ -602,7 +602,7 @@ bool Map::Impl::clampCenterToTerrain(double elevationMeters) {
     }
     // Raising the centre onto the terrain moves the orbit plane, not the centre's lng/lat,
     // so this settles rather than feeding back into the next frame's sample.
-    if (!held) {
+    if (!held && !ease) {
         transform.jumpTo(CameraOptions().withCenterAltitude(elevationMeters));
         return true;
     }
@@ -618,6 +618,7 @@ void Map::Impl::beginCameraChange(bool toCenter) {
     // The camera set replaces any transition running, and decides what the clamp keeps once heights
     // arrive (onUpdate): a centre given, or else the camera.
     cameraSetToCenter = toCenter;
+    cameraSetToCenterAnimated = false;
 }
 
 void Map::Impl::jumpTo(const CameraOptions& camera) {

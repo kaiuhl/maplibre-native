@@ -157,12 +157,14 @@ void Map::jumpTo(const CameraOptions& camera) {
 void Map::easeTo(const CameraOptions& camera, const AnimationOptions& animation) {
     impl->beginCameraChange(camera.center.has_value());
     impl->transform.easeTo(camera, animation);
+    impl->cameraSetToCenterAnimated = impl->cameraSetToCenter && impl->transform.inTransition();
     impl->onUpdate();
 }
 
 void Map::flyTo(const CameraOptions& camera, const AnimationOptions& animation) {
     impl->beginCameraChange(camera.center.has_value());
     impl->transform.flyTo(camera, animation);
+    impl->cameraSetToCenterAnimated = impl->cameraSetToCenter && impl->transform.inTransition();
     impl->onUpdate();
 }
 

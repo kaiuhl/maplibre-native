@@ -166,6 +166,10 @@ public:
     /// setCenterAltitudeKeepingView, a jump with no centre). Once a transition ends, the clamp keeps
     /// a centre it was given and otherwise keeps the camera (onUpdate).
     bool cameraSetToCenter = false;
+    /// Whether that centre was given to an animated move (easeTo or flyTo with a duration) rather
+    /// than a jump: the clamp eases it onto ground that changes under it once the move has ended,
+    /// as the move did on the way (easeTransitionOntoGround), rather than jumping the view there.
+    bool cameraSetToCenterAnimated = false;
     /// The ground under the centre as it is now: the map-side heights where they have it, else the
     /// height the renderer last reported.
     double groundUnderCenter() const;
@@ -184,10 +188,10 @@ public:
     /// settleCenterOnGround now, or once no transition or gesture moves the camera.
     void settleCenterOnGroundWhenStill();
     /// Moves the centre altitude to `elevationMeters` keeping lng/lat, easing it there
-    /// (Transform::easeCenterAltitudeTo) where it was held over unknown ground; false when the change is under the
+    /// (Transform::easeCenterAltitudeTo) where it was held over unknown ground, or with `ease`; false when the change is under the
     /// sub-metre threshold, or where `elevationMeters` is NaN: the ground is unknown, and the centre
     /// is held where it is.
-    bool clampCenterToTerrain(double elevationMeters);
+    bool clampCenterToTerrain(double elevationMeters, bool ease = false);
     /// The clamp found the ground under the centre unknown when it would have put the centre on it,
     /// and left the centre at the altitude it had; it eases the centre onto the ground once that
     /// arrives, rather than jumping the view there.

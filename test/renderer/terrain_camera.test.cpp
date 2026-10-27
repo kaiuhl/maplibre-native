@@ -885,6 +885,28 @@ TEST(TerrainCamera, CameraSetWhileTheClampWaitsForHeightsIsKept) {
     EXPECT_NEAR(test.altitude(), 900.0, 0.001);
 }
 
+// Ground that changes under the centre an animated move was given, once the move has ended (a
+// finer tile, the exaggeration), is eased onto over 0.4 s, as it was during the move: the camera
+// jumped onto it on one frame.
+TEST(TerrainCamera, GroundChangingAfterAnAnimatedMoveIsEasedOnto) {
+    TerrainTransitionTest test;
+    ASSERT_TRUE(test.settleOnPlateau());
+    ASSERT_TRUE(test.easeWest([](bool) {}));
+    ASSERT_NEAR(test.altitude(), westPlateauMeters, 5.0);
+
+    test.map.getStyle().getTerrain()->setExaggeration(1.1f);
+    Rise rise;
+    rise.add(test.eye()[2]);
+    const auto deadline = Clock::now() + Seconds(3);
+    while (Clock::now() < deadline && std::abs(test.altitude() - westPlateauMeters * 1.1) > 0.5) {
+        test.renderFrame();
+        rise.add(test.eye()[2]);
+        std::this_thread::sleep_for(Milliseconds(16));
+    }
+    EXPECT_NEAR(test.altitude(), westPlateauMeters * 1.1, 0.5);
+    EXPECT_GE(rise.milliseconds(), 300.0);
+}
+
 // A centre the app jumped to is still the one the clamp keeps when the heights under it change:
 // it is put on the new ground there, at the zoom it was given.
 TEST(TerrainCamera, HeightsChangingAfterAJumpKeepTheCentre) {
