@@ -29,7 +29,8 @@ struct alignas(16) SymbolDrawableUBO {
     /* 248 */ float opacity_t;
     /* 252 */ float halo_width_t;
     /* 256 */ float halo_blur_t;
-    /* 260 */ float pad1;
+    // Opacity left where the terrain hides the symbol (Layer::setTerrainOccludedOpacity)
+    /* 260 */ float occluded_opacity;
     /* 264 */ float pad2;
     /* 268 */ float pad3;
 

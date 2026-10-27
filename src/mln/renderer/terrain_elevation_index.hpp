@@ -51,6 +51,20 @@ public:
     /// covers it, as RenderTerrain::getElevationForLatLng. Nullopt where no DEM tile is loaded.
     std::optional<double> getElevation(const LatLng& latLng) const;
 
+    /// Unexaggerated heights over `tile` laid out as a DEM texture lays them out, for a tile no one
+    /// DEM tile covers (RenderTerrain::getTerrainData): `dim + 2 * border` samples a side, row by
+    /// row, sample (i, j) at tile fraction ((i - border) / dim, (j - border) / dim). Each is read
+    /// from the deepest tile under it, as getElevation reads it, and 0 where none has loaded.
+    std::vector<float> sampleGrid(const UnwrappedTileID& tile, int32_t dim, int32_t border) const;
+    /// The tiles loaded over `tile` - it, its ancestors and its descendants - which sampleGrid
+    /// reads it from: a hash of them, which changes only when sampleGrid's answer can, and the
+    /// deepest of their zooms, -1 for none.
+    struct Cover {
+        std::size_t signature = 0;
+        int deepest = -1;
+    };
+    Cover cover(const UnwrappedTileID& tile) const;
+
     float getExaggeration() const { return exaggeration; }
     /// Exaggerated height in metres of the highest point in any of the tiles; where the terrain
     /// pick can start its march (pickTerrainSurface).

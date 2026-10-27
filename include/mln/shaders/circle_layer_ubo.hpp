@@ -17,7 +17,8 @@ struct alignas(16) CircleDrawableUBO {
     /*  88 */ float stroke_color_t;
     /*  92 */ float stroke_width_t;
     /*  96 */ float stroke_opacity_t;
-    /* 100 */ float pad1;
+    // Opacity left where the terrain hides the circle (Layer::setTerrainOccludedOpacity)
+    /* 100 */ float occluded_opacity;
     /* 104 */ float pad2;
     /* 108 */ float pad3;
 
@@ -27,7 +28,8 @@ struct alignas(16) CircleDrawableUBO {
     /* 144 */ float dem_dim;
     /* 148 */ float dem_exaggeration;
     /* 152 */ float dem_enabled;
-    /* 156 */ float pad4;
+    // Terrain enabled: hide the circle behind it (calculate_visibility), as symbols' depth_enabled
+    /* 156 */ float depth_enabled;
     /* 160 */
 };
 static_assert(sizeof(CircleDrawableUBO) == 10 * 16);

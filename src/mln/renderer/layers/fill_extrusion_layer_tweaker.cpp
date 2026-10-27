@@ -87,17 +87,26 @@ void FillExtrusionLayerTweaker::execute(LayerGroupBase& layerGroup, const PaintP
         const auto& translation = evaluated.get<FillExtrusionTranslate>();
         const auto anchor = evaluated.get<FillExtrusionTranslateAnchor>();
         constexpr bool inViewportPixelUnits = false; // from RenderTile::translatedMatrix
-        constexpr bool nearClipped = true;
+        // Over 3D terrain an extrusion depth-tests against the terrain surface, which writes its
+        // depth through the default projection, remapped to the backend's clip volume
+        // (TerrainLayerTweaker); project the extrusion the same way, or the two depths are not
+        // comparable and a building behind a ridge draws over it. Off terrain, keep the
+        // near-clipped projection, which spends the depth range on the buildings alone.
+        const bool overTerrain = parameters.terrain && parameters.terrain->isEnabled();
+        const bool nearClipped = !overTerrain;
         // Fill extrusion is elevated, not draped
-        const auto matrix = getTileMatrix(tileID,
-                                          parameters,
-                                          translation,
-                                          anchor,
-                                          nearClipped,
-                                          inViewportPixelUnits,
-                                          drawable,
-                                          /*aligned=*/false,
-                                          /*renderToTerrain=*/false);
+        auto matrix = getTileMatrix(tileID,
+                                    parameters,
+                                    translation,
+                                    anchor,
+                                    nearClipped,
+                                    inViewportPixelUnits,
+                                    drawable,
+                                    /*aligned=*/false,
+                                    /*renderToTerrain=*/false);
+        if (overTerrain) {
+            remapClipDepth(matrix);
+        }
 
         const auto tileRatio = 1 / tileID.pixelsToTileUnits(1, state.getIntegerZoom());
         const auto zoomScale = state.zoomScale(tileID.canonical.z);
@@ -125,7 +134,7 @@ void FillExtrusionLayerTweaker::execute(LayerGroupBase& layerGroup, const PaintP
         // shader can displace the extrusion by the terrain elevation
         std::optional<RenderTerrain::TerrainData> terrainData;
         if (parameters.terrain && parameters.terrain->isEnabled()) {
-            terrainData = parameters.terrain->getTerrainData(tileID);
+            terrainData = parameters.terrain->getTerrainData(tileID, context);
         }
         if (parameters.terrain) {
             drawable.setTexture(

@@ -76,6 +76,14 @@ MLN_EXPORT
  */
 @property (nonatomic, assign) float minimumZoomLevel;
 
+/**
+ How strongly a symbol or circle layer still draws where 3D terrain stands between it and the
+ camera, from 0 (hidden, the default) to 1 (drawn as if the terrain were not there). Not part of
+ the style specification: a runtime setting for a layer that should stay faintly visible through a
+ ridge, such as a ring round a selected feature. It has no effect on other layer types.
+ */
+@property (nonatomic, assign) float terrainOccludedOpacity;
+
 @end
 
 NS_ASSUME_NONNULL_END

@@ -333,7 +333,7 @@ filled in by @daviani on an iPhone 16 Pro Max / iOS 26.6, built for device with
 | builds | yes | yes | **yes** (bazel, for device) | yes (Dawn) |
 | terrain renders | yes | **yes, verified on device** | **yes, verified on device** | untested |
 | terrain off->on (all 3 load modes) | yes | **yes, verified** | **yes** (via style JSON; load modes not separated) | untested |
-| symbol occlusion | yes | looks correct on device | untested (code path is complete; see below) | untested |
+| symbol occlusion | yes | looks correct on device | **yes** (2026-10-27, `TerrainOcclusion` gtests on macOS Metal, iOS simulator; see below) | untested |
 | **fill-extrusion elevation** | yes | **yes** (2026-08-01, render test pixel-matches the GL baseline) | **yes** (2026-08-02, shaders sample the DEM; CI confirmation pending) | yes |
 | instanced depth pass | yes (GL-only by design) | n/a (per-tile path) | n/a | n/a |
 
@@ -450,7 +450,8 @@ Lessons for the next attempt:
 z and its `unpack_depth()` does no `*2-1` remap; Metal/Vulkan/WebGPU still pack
 window depth (`FragCoord.z`) and keep the remap. Each backend is internally
 consistent, so occlusion works on each, but only GL has the corrected convention
-and the tuned soft ramp - worth converging.
+and the tuned soft ramp - worth converging. Metal's symbol and circle test compares
+distances rather than NDC z (see "Symbol occlusion on Metal" below).
 
 **Shared-code changes validated only on GL.** The opaque depth-tested terrain
 surface (`setEnableDepth(true)`), the depth-pass gate (`depthDirty`/camera-moved)
@@ -486,18 +487,37 @@ ahead of GL: quality 115.2 fps / 2.66 jank-per-s vs GL's 105.0 / 5.38, performan
 Balanced-mode benchmark run (0 samples captured). Not reproduced in four
 subsequent launches, so it is rare; no backtrace captured yet.
 
-**Symbol occlusion on Metal: code-complete, still unverified on screen.** An audit
-by @daviani alongside the device run above found the Metal path whole -
-`src/mln/shaders/mtl/terrain_depth.cpp` is the same shape as the Vulkan and WebGPU
-ones, all three symbol shaders bind `idSymbolDepthTexture` (slots 2/2/3 against
-Vulkan's 3/3/3, which is Metal numbering without the gap Vulkan leaves for the icon
-texture), and nothing in `render_terrain.cpp` branches away from Metal. What is
-missing is a test that can *see* an occluded marker: markers placed along a line are
-raised onto the surface and so are never behind it, and packing them across a ridge
-puts them in a narrow band near the horizon at high pitch where out-of-frame and
-occluded look alike. The Android answer is `TerrainFlightActivity`'s baked,
-elevation-planned path (probes placed by querying terrain elevation rather than by
-guessing coordinates); an iOS equivalent would fill this row.
+**Symbol occlusion on Metal (fixed 2026-10-27).** It never hid anything. The
+text-and-icon vertex shader declared the DEM and depth textures at slots 1/2 where the
+tweaker binds them at 2/3 (the icon texture holds slot 1); the packed depth texture was
+sampled with linear filtering, which blends its four bytes rather than the depths, and
+packed in steps of 1/256 (gl-js's) that the 8-bit target rounds to 1/255, bringing the
+terrain some 1.5e-5 nearer in depth - 2% of the distance to the middle of a phone's tilted
+view, 7% at the top of it, so once the test below compared distances the far labels
+faded; it is packed in steps of 1/255 now, true to 0.1% at any distance; and
+gl-js's NDC test (bias 0.0001, ramp 500), under this projection's one-pixel near plane,
+let anything more than a few metres past the terrain through, faded, since the NDC gap
+for a given distance shrinks with its square. Metal now compares distances instead
+(`depth_visibility` in `mtl/common.hpp`: hidden when the point is more than 3% farther
+than the first terrain on its line of sight, fading over 2% more), reading the
+projection's depth term off the drawable's matrix; circles are tested from their centre
+as gl-js's are; and each symbol or circle layer keeps `Layer::setTerrainOccludedOpacity`
+of its opacity behind the terrain (0 by default). Fill extrusions over terrain now use
+the terrain's projection, remapped as it is (`LayerTweaker::remapClipDepth`), where they
+used the near-clipped one and so drew over the ridges in front of them. A tile from a
+source shallower than the loaded DEM tiles gets a DEM sampled from the elevation index
+(`RenderTerrain::getTerrainData(tile, context)`, 256 px plus a 2 px border, ~0.35 ms
+each in the simulator's opt build, four sampled a frame, resampled once the heights under
+it have settled for 15 frames or after 60, 32 kept but never one in use), where it read
+the 1x1 placeholder and
+stood at sea level when no DEM tile covered it, or else the deepest ancestor: on a moving
+map that is the DEM tile prefetched four zooms up (z13 label tiles at Mt Hood read a z10
+DEM beside the z14 mesh), whose smoothed heights stand labels under or over the slopes the
+mesh draws, and so, once occlusion worked, faded labels in plain view.
+`test/renderer/terrain_occlusion.test.cpp` sees an occluded marker: a ridge across a
+pitched view, dots, icons and extrusions either side of it, and their pixels counted
+against the same view over flat ground. OpenGL, Vulkan and WebGPU keep gl-js's test and
+ignore the opacity setting.
 
 **Metal performance** (iPhone 16 Pro Max, iOS 26.6, z12 Innsbruck, camera rotating
 at 24 deg/s, 8 s per pass after a 2 s warm-up, `MLNRenderingStats`; two runs).

@@ -86,6 +86,12 @@ public:
                               bool inViewportPixelUnits,
                               bool aligned);
 
+    /// Remaps a GL-convention matrix (clip z in [-w, w]) to the backend's clip volume: unchanged on
+    /// OpenGL, z' = (z + w) / 2 on Metal, Vulkan and WebGPU, which clip z to [0, w]. The terrain
+    /// surface's depth is written through this, so 3D geometry that depth-tests against it must
+    /// be too.
+    static void remapClipDepth(/*in-out*/ mat4& matrix);
+
 protected:
     /// Determine whether this tweaker should apply to the given drawable
     bool checkTweakDrawable(const gfx::Drawable&) const;

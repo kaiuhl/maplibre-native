@@ -115,6 +115,15 @@ mat4 LayerTweaker::getTileMatrix(const UnwrappedTileID& tileID,
         tileID, tileMatrix, translation, anchor, transformState, inViewportPixelUnits);
 }
 
+void LayerTweaker::remapClipDepth([[maybe_unused]] mat4& matrix) {
+#if !MLN_RENDER_BACKEND_OPENGL
+    matrix[2] = 0.5 * (matrix[2] + matrix[3]);
+    matrix[6] = 0.5 * (matrix[6] + matrix[7]);
+    matrix[10] = 0.5 * (matrix[10] + matrix[11]);
+    matrix[14] = 0.5 * (matrix[14] + matrix[15]);
+#endif
+}
+
 uint64_t LayerTweaker::propertiesEpoch = 0;
 
 void LayerTweaker::updateProperties(Immutable<style::LayerProperties> newProps) {

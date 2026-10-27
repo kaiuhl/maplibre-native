@@ -127,6 +127,18 @@ const MLNExceptionName MLNInvalidStyleLayerException = @"MLNInvalidStyleLayerExc
   return self.rawLayer->getMinZoom();
 }
 
+- (void)setTerrainOccludedOpacity:(float)terrainOccludedOpacity {
+  MLNAssertStyleLayerIsValid();
+
+  self.rawLayer->setTerrainOccludedOpacity(terrainOccludedOpacity);
+}
+
+- (float)terrainOccludedOpacity {
+  MLNAssertStyleLayerIsValid();
+
+  return self.rawLayer->getTerrainOccludedOpacity();
+}
+
 - (NSString *)description {
   if (self.rawLayer) {
     return [NSString stringWithFormat:@"<%@: %p; identifier = %@; visible = %@>",

@@ -54,11 +54,15 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 }
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
-    // Pack the fragment depth into RGBA8, matching the maplibre-gl-js
-    // terrain_depth shader; unpacked by unpack_depth() for calculate_visibility()
+    // Pack the fragment depth into RGBA8, most significant byte in alpha, as the maplibre-gl-js
+    // terrain_depth shader does but in steps of 1/255, the steps the target stores; unpacked by
+    // unpack_depth() for calculate_visibility(). gl-js's steps of 1/256 come back rounded to
+    // 1/255, the terrain some 1.5e-5 nearer in depth: under the one-pixel near plane that is 2%
+    // of the distance to the middle of a phone's tilted view and 7% at the top of it, past the 3%
+    // a point may stand behind the terrain, so labels in plain view there faded or went.
     const float depth = in.position.z;
-    const float4 bit_shift = float4(256.0 * 256.0 * 256.0, 256.0 * 256.0, 256.0, 1.0);
-    const float4 bit_mask = float4(0.0, 1.0 / 256.0, 1.0 / 256.0, 1.0 / 256.0);
+    const float4 bit_shift = float4(255.0 * 255.0 * 255.0, 255.0 * 255.0, 255.0, 1.0);
+    const float4 bit_mask = float4(0.0, 1.0 / 255.0, 1.0 / 255.0, 1.0 / 255.0);
     float4 res = fract(depth * bit_shift);
     res -= res.xxyz * bit_mask;
     return half4(res);

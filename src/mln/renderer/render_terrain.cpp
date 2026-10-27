@@ -968,6 +968,7 @@ bool RenderTerrain::updateElevationIndex() {
         elevationGrids.clear();
         const bool changed = elevationIndex != nullptr;
         elevationIndex.reset();
+        ++elevationIndexGeneration;
         return changed;
     }
     const auto loaded = loadedDEMTiles(demSource);
@@ -1006,9 +1007,11 @@ bool RenderTerrain::updateElevationIndex() {
         // map already has none
         const bool hadIndex = elevationIndex != nullptr;
         elevationIndex.reset();
+        ++elevationIndexGeneration;
         return hadIndex;
     }
     elevationIndex = std::make_shared<const TerrainElevationIndex>(std::move(tiles), exaggeration);
+    ++elevationIndexGeneration;
     return true;
 }
 
@@ -1098,7 +1101,105 @@ std::optional<RenderTerrain::TerrainData> RenderTerrain::getTerrainData(const Un
         .demTexture = entry->texture,
         .demCoords = {{1.0f / (util::EXTENT * off.scale), off.dx / off.scale, off.dy / off.scale, 0.0f}},
         .demDim = static_cast<float>(entry->dim),
+        .demZoom = demTileID->canonical.z,
     };
+}
+
+std::optional<RenderTerrain::TerrainData> RenderTerrain::getTerrainData(const UnwrappedTileID& tileID,
+                                                                        gfx::Context& context) {
+    auto data = getTerrainData(tileID);
+    if (data && data->demZoom == tileID.canonical.z) {
+        return data;
+    }
+    // No DEM tile of the tile's own zoom covers it. Either it is deeper than the DEM, and an
+    // ancestor's is all there is to read, or it is shallower than the DEM loaded under it (a
+    // source whose maxzoom is below the DEM's zoom there), under no DEM tile at all or only a
+    // prefetched one zooms coarser: a z13 label tile under a z10 DEM, beside a mesh drawn from
+    // z14 DEM tiles. On that its symbols, circles and extrusions stand on heights the mesh has
+    // not got, sunk out of sight behind the slope they belong on or floating over a valley, or at
+    // sea level. The heights loaded under it are in elevationIndex, so give it a DEM sampled from
+    // them, the deepest under each point, as the mesh and elevationSampler's collision boxes have.
+    const auto& index = elevationIndex;
+    if (!index) {
+        sampledDEMMissed = sampledDEMMissed || !data;
+        return data;
+    }
+    auto& entry = sampledDEMTextures[tileID];
+    entry.lastUsedFrame = sampledDEMFrame;
+    if (entry.indexGeneration != elevationIndexGeneration) {
+        const auto cover = index->cover(tileID);
+        if (cover.signature != entry.cover.signature) {
+            entry.coverChangedFrame = sampledDEMFrame;
+        }
+        entry.cover = cover;
+        entry.indexGeneration = elevationIndexGeneration;
+    }
+    if (entry.cover.deepest < 0 || (data && entry.cover.deepest <= data->demZoom)) {
+        // Nothing loaded over it is finer than the ancestor (or than sea level)
+        return data;
+    }
+    if (!entry.texture || entry.signature != entry.cover.signature) {
+        const bool due = !entry.texture || sampledDEMFrame - entry.coverChangedFrame >= sampledDEMSettleFrames ||
+                         sampledDEMFrame - entry.sampledFrame >= sampledDEMMaxStaleFrames;
+        if (!due || sampledDEMBuilds >= maxSampledDEMBuildsPerFrame) {
+            sampledDEMDeferred = true;
+        } else {
+            ++sampledDEMBuilds;
+            constexpr int32_t border = 2; // as DEMData's, which get_elevation addresses
+            const int32_t side = sampledDEMDim + 2 * border;
+            const auto heights = index->sampleGrid(tileID, sampledDEMDim, border);
+            auto image = std::make_shared<PremultipliedImage>(
+                Size{static_cast<uint32_t>(side), static_cast<uint32_t>(side)});
+            for (size_t i = 0; i < heights.size(); ++i) {
+                const auto pixel = encodeDEMHeight(demUnpackVector, heights[i]);
+                std::memcpy(image->data.get() + i * 4, pixel.data(), pixel.size());
+            }
+            auto texture = context.createTexture2D();
+            texture->setImage(image);
+            texture->setSamplerConfiguration({.filter = gfx::TextureFilterType::Nearest,
+                                              .wrapU = gfx::TextureWrapType::Clamp,
+                                              .wrapV = gfx::TextureWrapType::Clamp});
+            entry.texture = std::move(texture);
+            entry.signature = entry.cover.signature;
+            entry.sampledFrame = sampledDEMFrame;
+            context.renderingStats().numDEMTexturesCreated++;
+        }
+    }
+    if (!entry.texture) {
+        return data;
+    }
+    return TerrainData{
+        .demTexture = entry.texture,
+        .demCoords = {{1.0f / util::EXTENT, 0.0f, 0.0f, 0.0f}},
+        .demDim = static_cast<float>(sampledDEMDim),
+        .demZoom = static_cast<uint8_t>(entry.cover.deepest),
+    };
+}
+
+bool RenderTerrain::takeSampledDEMRedraw() {
+    bool redraw = (sampledDEMMissed && elevationIndex) || sampledDEMDeferred;
+    for (const auto& [id, entry] : sampledDEMTextures) {
+        if (entry.lastUsedFrame == sampledDEMFrame && entry.indexGeneration != elevationIndexGeneration) {
+            redraw = true;
+        }
+    }
+    // Drawables hold their own references, so dropping the least recently asked for frees only
+    // what nothing draws with; those this frame drew with stay, however many
+    while (sampledDEMTextures.size() > maxSampledDEMTextures) {
+        auto oldest = std::min_element(
+            sampledDEMTextures.begin(), sampledDEMTextures.end(), [](const auto& a, const auto& b) {
+                return a.second.lastUsedFrame < b.second.lastUsedFrame;
+            });
+        if (oldest->second.lastUsedFrame == sampledDEMFrame) {
+            break;
+        }
+        sampledDEMTextures.erase(oldest);
+    }
+    sampledDEMMissed = false;
+    sampledDEMDeferred = false;
+    sampledDEMBuilds = 0;
+    ++sampledDEMFrame;
+    return redraw;
 }
 
 std::array<uint8_t, 4> RenderTerrain::encodeDEMHeight(const std::array<float, 4>& unpack, float metres) {
@@ -1215,6 +1316,11 @@ void RenderTerrain::prepareDepthTarget(PaintParameters& parameters) {
         }
         // Far plane everywhere the terrain does not cover (unpack_depth(1,1,1,1) ~ 1.0)
         depthRenderTarget->setClearColor(Color::white());
+        // The depth is packed into the four bytes; filtering would blend the bytes, not the
+        // depths, so read the texel under the point as it is
+        depthRenderTarget->getTexture()->setSamplerConfiguration({.filter = gfx::TextureFilterType::Nearest,
+                                                                  .wrapU = gfx::TextureWrapType::Clamp,
+                                                                  .wrapV = gfx::TextureWrapType::Clamp});
     }
     // (Re)attach the depth layer group; it may not have existed yet when the
     // target was first created on an early frame
