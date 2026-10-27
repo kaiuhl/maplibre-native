@@ -528,10 +528,12 @@ std::unique_ptr<RenderTree> RenderOrchestrator::createRenderTree(
         tileParameters.isUpdateSynchronous = sourceImpl->isUpdateSynchronous();
         // The DEM source additionally keeps the coarser ancestors of its cover that are already
         // loaded, so that a tile another layer draws from - shallower far-field LOD tiles,
-        // overzoomed sources with a low maxzoom - can bind a DEM ancestor for elevation (see
+        // overzoomed sources with a low maxzoom - can bind a DEM ancestor for elevation, and
+        // always covers the ground under the centre, whose height the clamp needs (see
         // TileParameters).
         const bool isDEMSource = terrainEnabled && sourceImpl->id == renderTerrain->getSourceID();
         tileParameters.retainAncestorLevels = isDEMSource ? RenderTerrain::demAncestorLevels : 0;
+        tileParameters.coverCenter = isDEMSource;
         source->update(sourceImpl, filteredLayersForSource, sourceNeedsRendering, sourceNeedsRelayout, tileParameters);
         filteredLayersForSource.clear();
 

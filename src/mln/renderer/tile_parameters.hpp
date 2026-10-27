@@ -56,6 +56,11 @@ public:
     /// distance LOD) can bind a DEM tile that covers them whole; where none has loaded,
     /// RenderTerrain::elevationSampler reads the deeper tiles point by point.
     uint8_t retainAncestorLevels = 0;
+    /// Whether the cover always includes the tile under the map centre, in view or not. Set for the
+    /// 3D-terrain DEM source: the centre clamp needs the height there, and the elevation-aware
+    /// cover drops tiles whose ground stands above the camera, every one around a camera put
+    /// inside the terrain.
+    bool coverCenter = false;
 };
 
 } // namespace mln

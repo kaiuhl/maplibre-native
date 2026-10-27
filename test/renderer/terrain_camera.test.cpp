@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <functional>
 #include <iterator>
 #include <thread>
 #include <utility>
@@ -1365,5 +1366,55 @@ TEST(TerrainCamera, CentreLandsOnTheGroundWhenTerrainIsEnabledAtHighZoom) {
 
     test.map.getStyle().setTerrain(std::make_unique<style::Terrain>("dem"));
     test.renderAndGetAltitude(8);
+    expectCameraAboveTheGround(test);
+}
+
+// The same where the DEM tile under the centre arrives after the one beside it. With the camera
+// inside the ground, the first heights to arrive put the rest of the view's tiles above it, and the
+// tile cover dropped them all, the one under the centre while it was still loading: a tile dropped
+// before it has loaded isn't cached, nothing asked for it again, and the centre never had a height
+// to be put on. As decoding finished in one order or the other, a z17 map over Mt Hood stayed blank
+// one time in ten (TerrainDEMCache.StaticViewCreatesNoDEMTexturesOnceSettled).
+TEST(TerrainCamera, CentreLandsOnTheGroundWhenItsDemArrivesLast) {
+    TerrainCameraTest test(MapMode::Continuous);
+    const std::string ground = makeDEMTile(highGroundMeters);
+    // Just east of the prime meridian, so the view spans the z2 tile under the centre and the one
+    // west of it. Held: every tile under the centre, the z1 and z0 tiles over both included.
+    const LatLng centre{47.2692, 0.0002};
+    bool hold = true;
+    bool servedBeside = false;
+    test.fileSource->tileResponse = [&](const Resource& resource) -> std::optional<Response> {
+        if (const auto& tile = resource.tileData) {
+            const Point<double> p = Projection::project(centre, static_cast<int32_t>(tile->z));
+            const bool underCentre = std::floor(p.x) == tile->x && std::floor(p.y) == tile->y;
+            if (underCentre && hold) {
+                return std::nullopt; // still on its way
+            }
+            servedBeside |= !underCentre;
+        }
+        Response res;
+        res.data = std::make_shared<std::string>(ground);
+        return res;
+    };
+    test.map.setCenterClampedToGround(true);
+    test.map.jumpTo(CameraOptions().withCenter(centre).withZoom(17.0).withPitch(45.0).withCenterAltitude(0.0));
+    ASSERT_LT(test.eye()[2] / mercatorMetre, highGroundMeters);
+
+    const auto renderFor = [&](Milliseconds duration, const std::function<bool()>& done) {
+        const auto deadline = Clock::now() + duration;
+        while (Clock::now() < deadline && !done()) {
+            test.loop.runOnce();
+            test.frontend.renderFrame();
+            std::this_thread::sleep_for(Milliseconds(16));
+        }
+    };
+    renderFor(Milliseconds(500), [] { return false; });
+    ASSERT_TRUE(servedBeside);
+    ASSERT_NEAR(*test.map.getCameraOptions({}).centerAltitude, 0.0, 0.001);
+
+    hold = false;
+    renderFor(Seconds(3), [&] {
+        return std::abs(*test.map.getCameraOptions({}).centerAltitude - highGroundMeters) < 5.0;
+    });
     expectCameraAboveTheGround(test);
 }

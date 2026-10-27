@@ -10,6 +10,7 @@
 #include <mln/util/tile_range.hpp>
 #include <mln/util/enum.hpp>
 #include <mln/util/logging.hpp>
+#include <mln/util/projection.hpp>
 
 #include <mln/algorithm/update_renderables.hpp>
 
@@ -17,6 +18,7 @@
 
 #include <cmath>
 #include <algorithm>
+#include <array>
 
 namespace mln {
 
@@ -25,6 +27,38 @@ using namespace style;
 namespace {
 TileObserver nullObserver;
 const std::map<OverscaledTileID, std::unique_ptr<Tile>> emptyPrefetchedTiles;
+
+// Adds the tile at zoom `z` under the map centre to `tiles`, unless one of them covers the centre
+// already (TileParameters::coverCenter). A camera put inside the 3D terrain sees none of the ground
+// around it, so the elevation-aware cover culls the tiles there, and drops the one under the centre
+// whether or not it has loaded: one still loading isn't cached, nothing asked for it again, and the
+// centre clamp never had a height to put the camera back above the ground with.
+void coverCenter(std::vector<OverscaledTileID>& tiles, const TransformState& state, uint8_t z, uint8_t overscaledZ) {
+    const LatLng center = state.getLatLng(LatLng::Unwrapped);
+    // The centre's tile at `zoom`, x unwrapped: in tile units, a world 2^zoom across.
+    const auto tileAt = [&](uint8_t zoom) {
+        const Point<double> p = Projection::project(center, static_cast<int32_t>(zoom));
+        const auto across = static_cast<int64_t>(1) << zoom;
+        return std::array<int64_t, 2>{static_cast<int64_t>(std::floor(p.x)),
+                                      std::clamp<int64_t>(static_cast<int64_t>(std::floor(p.y)), 0, across - 1)};
+    };
+    const bool covered = std::ranges::any_of(tiles, [&](const OverscaledTileID& id) {
+        const auto [x, y] = tileAt(id.canonical.z);
+        const auto across = static_cast<int64_t>(1) << id.canonical.z;
+        return x == id.canonical.x + id.wrap * across && y == id.canonical.y;
+    });
+    if (covered) {
+        return;
+    }
+    const auto [x, y] = tileAt(z);
+    const auto across = static_cast<int64_t>(1) << z;
+    const int64_t wrap = (x >= 0 ? x : x - across + 1) / across; // floor division
+    tiles.emplace_back(overscaledZ,
+                       static_cast<int16_t>(wrap),
+                       z,
+                       static_cast<uint32_t>(x - wrap * across),
+                       static_cast<uint32_t>(y));
+}
 } // namespace
 
 TilePyramid::TilePyramid(const TaggedScheduler& threadPool_)
@@ -150,6 +184,12 @@ void TilePyramid::update(const std::vector<Immutable<style::LayerProperties>>& l
                               "Provided camera options returned " + std::to_string(idealTiles.size()) +
                                   " tiles, only " + util::toString(idealTiles[0]) + " is taken in Tile mode.");
             idealTiles = {idealTiles[0]};
+        }
+        if (parameters.coverCenter) {
+            coverCenter(idealTiles,
+                        parameters.transformState,
+                        static_cast<uint8_t>(idealZoom),
+                        static_cast<uint8_t>(tileZoom));
         }
     }
 
