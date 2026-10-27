@@ -64,6 +64,21 @@ const char* terrainStyle = R"STYLE({
   "layers": []
 })STYLE";
 
+// terrainStyle without the terrain, which the app sets on a style once it has loaded.
+const char* terrainlessStyle = R"STYLE({
+  "version": 8,
+  "sources": {
+    "dem": {
+      "type": "raster-dem",
+      "tiles": ["http://example.com/{z}-{x}-{y}.png"],
+      "encoding": "mapbox",
+      "maxzoom": 2,
+      "tileSize": 64
+    }
+  },
+  "layers": []
+})STYLE";
+
 struct TerrainCameraTest {
     util::RunLoop loop;
     std::shared_ptr<StubFileSource> fileSource = std::make_shared<StubFileSource>(ResourceOptions::Default(),
@@ -629,6 +644,13 @@ struct TerrainTransitionTest {
 
     vec3 eye() const { return *map.getFreeCameraOptions().position; }
 
+    // Reloads the style the way the app does as its data lands: the new style comes without terrain,
+    // and the terrain is set on it once it has loaded, before the next frame.
+    void reloadStyle() {
+        map.getStyle().loadJSON(terrainlessStyle);
+        map.getStyle().setTerrain(std::make_unique<style::Terrain>("dem", 1.0f));
+    }
+
     // The camera is where the transition left it, to within a metre.
     void expectEyeAtEnd() const {
         const vec3 actual = eye();
@@ -1135,6 +1157,45 @@ TEST(TerrainCamera, ClampPutsTheCentreBackOnTerrainThatReturns) {
 
     test.map.getStyle().setTerrain(std::make_unique<style::Terrain>("dem", 1.0f));
     EXPECT_TRUE(test.settleOnPlateau()) << "centre altitude " << test.altitude();
+}
+
+// A style reload draws no frame without terrain: the new style comes without it, and the app sets it
+// again once that has loaded. The map returns the centre to sea level as the terrain goes; the new
+// terrain then finds the ground the old one reported, and the clamp has to put the centre back on
+// it all the same, or the view stays dropped until the ground under the centre changes (8-30 s and
+// more after a flight in the simulator).
+TEST(TerrainCamera, ClampPutsTheCentreBackOnTheGroundAfterAStyleReload) {
+    TerrainTransitionTest test;
+    ASSERT_TRUE(test.settleOnPlateau());
+
+    test.reloadStyle();
+    ASSERT_NEAR(test.altitude(), 0.0, 0.001) << "the terrain went, and the centre with it";
+    EXPECT_TRUE(test.settleOnPlateau()) << "centre altitude " << test.altitude();
+}
+
+// The same over ground whose heights haven't arrived. The new terrain knows no more of it than the
+// old one did; the clamp holds the centre at sea level, where the reload left it, and eases it onto
+// the ground once that arrives rather than jumping the view there, as for a move that ends over it.
+TEST(TerrainCamera, StyleReloadOverUnloadedGroundHoldsTheCentreThenEases) {
+    TerrainTransitionTest test;
+    test.holdWestEntirely = true;
+    ASSERT_TRUE(test.settleOnPlateau());
+    test.map.jumpTo(CameraOptions().withCenter(test.westTarget));
+    for (int i = 0; i < 10; ++i) {
+        test.renderFrame();
+    }
+    ASSERT_NEAR(test.altitude(), plateauMeters, 1.0) << "held over the unloaded plateau";
+
+    test.reloadStyle();
+    for (int i = 0; i < 10; ++i) {
+        test.renderFrame();
+    }
+    ASSERT_FALSE(test.map.getTerrainElevation(test.westTarget)) << "the plateau's heights are still on their way";
+    EXPECT_NEAR(test.altitude(), 0.0, 0.001);
+
+    // Eased onto the plateau, 2000 m up, over 0.4 s, where a jump takes one frame.
+    EXPECT_GE(test.millisecondsRisingOntoWestPlateau(), 300.0);
+    EXPECT_NEAR(test.altitude(), westPlateauMeters, 5.0);
 }
 
 // The terrain height under a position reads the loaded DEM, as drawn: nothing before a tile
