@@ -13,9 +13,13 @@
 #include <mln/util/image.hpp>
 #include <mln/util/run_loop.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <iterator>
 #include <thread>
+#include <utility>
+#include <vector>
 
 using namespace mln;
 
@@ -479,6 +483,35 @@ std::string makeDEMTile(double meters) {
 
 constexpr double westPlateauMeters = 2000.0;
 
+// The camera's height on each frame of a rise from one plateau to the other, and when the frame was
+// rendered. Frames come as fast as the machine renders them, so how far the camera rose on any one
+// of them depends on the machine; how long the rise took doesn't.
+struct Rise {
+    std::vector<std::pair<TimePoint, double>> frames;
+
+    void add(double height) { frames.emplace_back(Clock::now(), height); }
+
+    // Milliseconds from the last frame at the height the camera started at to the first at the height
+    // it ended at, to within a metre: an ease's duration at least, however far apart frames come, and
+    // one frame for a jump. None if it didn't rise.
+    double milliseconds() const {
+        if (frames.empty() || std::abs(frames.back().second - frames.front().second) <= mercatorMetre) {
+            return 0.0;
+        }
+        const double from = frames.front().second;
+        const double to = frames.back().second;
+        const auto arrived = std::find_if(
+            frames.begin(), frames.end(), [&](const auto& frame) { return std::abs(frame.second - to) <= mercatorMetre; });
+        const auto left = std::find_if(std::make_reverse_iterator(arrived), frames.rend(), [&](const auto& frame) {
+            return std::abs(frame.second - from) <= mercatorMetre;
+        });
+        if (left == frames.rend()) {
+            return 0.0;
+        }
+        return std::chrono::duration<double, std::milli>(arrived->first - left->first).count();
+    }
+};
+
 // Continuous mode, so camera transitions run on the clock while frames render, with the
 // clamp on. The z2 DEM tiles between 90°W and the prime meridian (x = 1) are a 2000 m
 // plateau, the rest 1000 m, so a move west from Innsbruck crosses a step in the terrain.
@@ -689,18 +722,14 @@ TEST(TerrainCamera, EaseOntoGroundLoadedDuringTheMoveEndsWithoutAJump) {
 
     bool released = false;
     double releasedAt = 0.0;
-    double largestStep = 0.0;
-    double previous = test.eye()[2];
+    Rise rise;
+    rise.add(test.eye()[2]);
     ASSERT_TRUE(test.runTransition(
         [&](const AnimationOptions& animation) {
             test.map.easeTo(CameraOptions().withCenter(test.westTarget).withCenterAltitude(plateauMeters), animation);
         },
-        [&](bool finished) {
-            const double height = test.eye()[2];
-            if (!finished) {
-                largestStep = std::max(largestStep, std::abs(height - previous));
-            }
-            previous = height;
+        [&](bool) {
+            rise.add(test.eye()[2]);
             // A third of the way there, the plateau's heights arrive.
             const double longitude = test.map.getCameraOptions({}).center->longitude();
             if (!released && longitude < 0.0) {
@@ -716,8 +745,8 @@ TEST(TerrainCamera, EaseOntoGroundLoadedDuringTheMoveEndsWithoutAJump) {
     const auto camera = test.map.getCameraOptions({});
     EXPECT_NEAR(*camera.centerAltitude, westPlateauMeters, 5.0);
     EXPECT_NEAR(camera.center->longitude(), test.westTarget.longitude(), 1e-6);
-    // Eased: a 1000 m rise over the rest of the move, no step of it a jump.
-    EXPECT_LT(largestStep, 400.0 * mercatorMetre);
+    // Eased: the 1000 m rise takes most of the second the move had left, not one frame.
+    EXPECT_GE(rise.milliseconds(), 500.0);
 }
 
 // An animated move that leaves the centre where it is (a tilt, as the app gives one when 3D comes
@@ -734,27 +763,20 @@ TEST(TerrainCamera, TiltInPlaceEasesTheCentreAltitude) {
     ASSERT_NEAR(test.altitude(), 0.0, 1.0);
     const LatLng center = *test.map.getCameraOptions({}).center;
 
-    bool done = false;
-    double largestStep = 0.0;
-    double previous = test.altitude();
+    // The centre altitude rather than the camera's height, which the tilt changes too; in the
+    // mercator units Rise takes heights in.
+    Rise rise;
+    rise.add(test.altitude() * mercatorMetre);
     ASSERT_TRUE(test.runTransition(
         [&](const AnimationOptions& animation) {
             test.map.easeTo(CameraOptions().withCenter(center).withPitch(30.0).withCenterAltitude(plateauMeters),
                             animation);
         },
-        [&](bool finished) {
-            if (done) {
-                return;
-            }
-            const double altitude = test.altitude();
-            largestStep = std::max(largestStep, std::abs(altitude - previous));
-            previous = altitude;
-            done = finished;
-        }));
+        [&](bool) { rise.add(test.altitude() * mercatorMetre); }));
 
     EXPECT_NEAR(test.altitude(), plateauMeters, 5.0);
-    // Eased: no frame of the 1000 m rise is a jump.
-    EXPECT_LT(largestStep, 400.0);
+    // Eased: the 1000 m rise takes most of the 1.5 s move, not its last frame.
+    EXPECT_GE(rise.milliseconds(), 750.0);
 }
 
 // The same for a free camera set while a transition runs: it stays where it was put.
