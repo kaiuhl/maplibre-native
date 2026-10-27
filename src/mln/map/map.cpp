@@ -118,6 +118,8 @@ void Map::setStyle(std::unique_ptr<Style> style) {
 // MARK: - Transitions
 
 void Map::cancelTransitions() {
+    // Stopped short of any centre it was given: the clamp keeps the camera where it stopped.
+    impl->transitionNamedCenter = false;
     impl->transform.cancelTransitions();
     impl->onUpdate();
 }
@@ -156,6 +158,7 @@ void Map::jumpTo(const CameraOptions& camera) {
 void Map::easeTo(const CameraOptions& camera, const AnimationOptions& animation) {
     impl->cameraMutated = true;
     impl->settleCenterAwaitingSeaLevel();
+    impl->transitionNamedCenter = camera.center.has_value();
     impl->transform.easeTo(camera, animation);
     impl->onUpdate();
 }
@@ -163,6 +166,7 @@ void Map::easeTo(const CameraOptions& camera, const AnimationOptions& animation)
 void Map::flyTo(const CameraOptions& camera, const AnimationOptions& animation) {
     impl->cameraMutated = true;
     impl->settleCenterAwaitingSeaLevel();
+    impl->transitionNamedCenter = camera.center.has_value();
     impl->transform.flyTo(camera, animation);
     impl->onUpdate();
 }
@@ -170,6 +174,7 @@ void Map::flyTo(const CameraOptions& camera, const AnimationOptions& animation) 
 void Map::moveBy(const ScreenCoordinate& point, const AnimationOptions& animation) {
     impl->cameraMutated = true;
     impl->settleCenterAwaitingSeaLevel();
+    impl->transitionNamedCenter = false;
     impl->transform.moveBy(point, animation);
     impl->onUpdate();
 }
@@ -186,6 +191,7 @@ void Map::scaleBy(double scale, const std::optional<ScreenCoordinate>& anchor, c
 void Map::rotateBy(const ScreenCoordinate& first, const ScreenCoordinate& second, const AnimationOptions& animation) {
     impl->cameraMutated = true;
     impl->settleCenterAwaitingSeaLevel();
+    impl->transitionNamedCenter = false;
     impl->transform.rotateBy(first, second, animation);
     impl->onUpdate();
 }
