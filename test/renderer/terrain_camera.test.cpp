@@ -532,16 +532,19 @@ struct TerrainTransitionTest {
         return false;
     }
 
-    // Eases west onto the 2000 m plateau; `whileRunning` is called after every frame of the
-    // transition. Returns once the transition has finished and a few more frames rendered.
-    template <typename Fn>
-    bool easeWest(Fn whileRunning) {
+    // Runs the transition `start` begins with `animation`, calling `whileRunning` after each of
+    // its frames, until it has finished and a few more frames rendered. `eyeAtEnd` and
+    // `centerAtEnd` keep the camera as it left it, before the clamp acted.
+    template <typename Start, typename Fn>
+    bool runTransition(Start start, Fn whileRunning) {
         bool finished = false;
         AnimationOptions animation(Milliseconds(1500));
         animation.transitionFinishFn = [&] {
             finished = true;
+            eyeAtEnd = eye();
+            centerAtEnd = *map.getCameraOptions({}).center;
         };
-        map.easeTo(CameraOptions().withCenter(westTarget), animation);
+        start(animation);
 
         const auto deadline = Clock::now() + Seconds(20);
         while (!finished && Clock::now() < deadline) {
@@ -554,14 +557,41 @@ struct TerrainTransitionTest {
         return finished;
     }
 
+    // Eases west onto the 2000 m plateau, a transition given its centre.
+    template <typename Fn>
+    bool easeWest(Fn whileRunning) {
+        return runTransition(
+            [&](const AnimationOptions& animation) { map.easeTo(CameraOptions().withCenter(westTarget), animation); },
+            whileRunning);
+    }
+
+    // Pans west onto the 2000 m plateau the way a fling's deceleration does: a move relative to
+    // the view, with no centre to arrive at.
+    bool flingWest() {
+        return runTransition([&](const AnimationOptions& animation) { map.moveBy({200.0, 0.0}, animation); },
+                             [](bool) {});
+    }
+
+    vec3 eye() const { return *map.getFreeCameraOptions().position; }
+
+    // The camera is where the transition left it, to within a metre.
+    void expectEyeAtEnd() const {
+        const vec3 actual = eye();
+        for (int i = 0; i < 3; ++i) {
+            EXPECT_NEAR(actual[i], eyeAtEnd[i], mercatorMetre) << "axis " << i;
+        }
+    }
+
     const LatLng westTarget{47.2692, -30.0};
+    vec3 eyeAtEnd{};
+    LatLng centerAtEnd;
 };
 
 } // namespace
 
 // Across relief the height under the centre changes every frame of a camera transition. The
 // clamp waits for the transition to end instead of cancelling it with a jump, then puts the
-// centre on the ground it arrived over.
+// centre it was given on the ground there.
 TEST(TerrainCamera, ClampWaitsForTransitionToEnd) {
     TerrainTransitionTest test;
     ASSERT_TRUE(test.settleOnPlateau());
@@ -572,6 +602,53 @@ TEST(TerrainCamera, ClampWaitsForTransitionToEnd) {
     EXPECT_NEAR(camera.center->latitude(), test.westTarget.latitude(), 1e-6);
     EXPECT_NEAR(camera.center->longitude(), test.westTarget.longitude(), 1e-6);
     EXPECT_NEAR(*camera.centerAltitude, westPlateauMeters, 5.0);
+}
+
+// A fling arrives with the centre still at the height it set out from, 1000 m below the plateau
+// it now looks at, and has no centre of its own to keep. The clamp keeping the centre and zoom
+// would lift the camera 1000 m on the frame the motion stops, jumping the whole view; the centre
+// moves along the line of sight onto the ground instead, and the camera stays where it was.
+TEST(TerrainCamera, ClampAfterAFlingKeepsTheCamera) {
+    TerrainTransitionTest test;
+    ASSERT_TRUE(test.settleOnPlateau());
+
+    ASSERT_TRUE(test.flingWest());
+    // Arrived over the plateau with the centre's height from before the fling
+    ASSERT_LT(test.centerAtEnd.longitude(), -5.0);
+
+    test.expectEyeAtEnd();
+    const auto camera = test.map.getCameraOptions({});
+    EXPECT_NEAR(*camera.centerAltitude, westPlateauMeters, 5.0);
+    // Towards the camera, south at bearing 0, by the 1000 m rise times tan(60 degrees)
+    const double southMetres = util::deg2rad(test.centerAtEnd.latitude() - camera.center->latitude()) *
+                               util::EARTH_RADIUS_M;
+    EXPECT_NEAR(southMetres, 1000.0 * std::tan(util::deg2rad(60.0)), 50.0);
+
+    // On the ground already, so the clamp has nothing left to do frames later.
+    for (int i = 0; i < 10; ++i) {
+        test.renderFrame();
+    }
+    test.expectEyeAtEnd();
+}
+
+// A transition cancelled short of its centre has no centre to keep either: the camera stays where
+// the cancel left it.
+TEST(TerrainCamera, ClampAfterACancelledTransitionKeepsTheCamera) {
+    TerrainTransitionTest test;
+    ASSERT_TRUE(test.settleOnPlateau());
+
+    bool cancelled = false;
+    ASSERT_TRUE(test.easeWest([&](bool finished) {
+        // Well over the 2000 m plateau, so the clamp has a new height waiting.
+        if (!finished && !cancelled && test.map.getCameraOptions({}).center->longitude() < -5.0) {
+            test.map.cancelTransitions();
+            cancelled = true;
+        }
+    }));
+    ASSERT_TRUE(cancelled);
+
+    test.expectEyeAtEnd();
+    EXPECT_NEAR(*test.map.getCameraOptions({}).centerAltitude, westPlateauMeters, 5.0);
 }
 
 // A terrain removed while the clamp waits for a transition takes the waiting height with it:

@@ -153,6 +153,18 @@ public:
     /// A height report arrived while a camera transition was running; the clamp applies it
     /// once the transition ends instead of cutting the transition short.
     bool centerAwaitingTerrainAnchor = false;
+    /// Whether the last transition started was given a centre to arrive at (easeTo or flyTo with
+    /// one) and not cancelled short of it, rather than moving relative to the view (moveBy,
+    /// rotateBy, a zoom or turn around an anchor: a gesture's deceleration). Once it ends, the
+    /// clamp keeps a centre it was given and otherwise keeps the camera (onUpdate).
+    bool transitionNamedCenter = false;
+    /// Height of the ground the line of sight from the camera through the centre meets first,
+    /// from the map-side heights: where setCenterAltitudeKeepingView puts the centre on the
+    /// terrain. Nullopt without heights there, or with the camera inside the terrain.
+    std::optional<double> groundOnLineOfSight() const;
+    /// Puts the centre on that ground keeping the camera; false, changing nothing, where there is
+    /// none or setCenterAltitudeKeepingView refuses the move.
+    bool anchorCenterOnLineOfSight();
     /// Moves the centre altitude to `elevationMeters` keeping lng/lat; false when the change
     /// is under the sub-metre threshold.
     bool clampCenterToTerrain(double elevationMeters);

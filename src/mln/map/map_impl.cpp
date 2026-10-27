@@ -132,12 +132,21 @@ void Map::Impl::onUpdate() {
         returnCenterToSeaLevel();
     }
 
-    // The clamp stood aside for a transition (onTerrainCenterElevationChanged); now that it
-    // is over, put the centre on the ground it arrived over. The reported height outlives a
-    // terrain removed during the transition, so only apply it while there is still terrain.
+    // The clamp stood aside for a transition (onTerrainCenterElevationChanged); now that it is
+    // over, put the centre on the ground. A transition given a centre (an animated recenter)
+    // arrives there, and the clamp keeps it and the zoom, moving the camera onto the ground under
+    // it. One relative to the view (a fling's deceleration) has no centre to keep, and the same
+    // clamp would lift or drop the camera by however much the ground changed under the move: the
+    // whole view jumped on the frame a fling came to rest. There the camera stays where the move
+    // left it and the centre slides along the line of sight onto the ground it meets, as gl-js's
+    // recalculateZoom does at the end of a terrain gesture; the clamp only where that cannot be
+    // done (a camera inside the terrain is what the clamp lifts out). The reported height
+    // outlives a terrain removed during the transition, so only apply it while there is still
+    // terrain.
     if (centerAwaitingTerrainAnchor && !transform.inTransition()) {
         centerAwaitingTerrainAnchor = false;
-        if (centerClampedToGround && style->impl->getTerrain() && !std::isnan(terrainCenterElevation)) {
+        if (centerClampedToGround && style->impl->getTerrain() && !std::isnan(terrainCenterElevation) &&
+            (transitionNamedCenter || !anchorCenterOnLineOfSight())) {
             clampCenterToTerrain(terrainCenterElevation);
         }
     }
@@ -359,7 +368,10 @@ void Map::Impl::anchorCenterOnTerrain() {
     if (!style->impl->getTerrain() || std::isnan(terrainCenterElevation)) {
         return;
     }
-    if (setCenterAltitudeKeepingView(terrainCenterElevation)) {
+    // The ground the line of sight meets, where the map-side heights have it, rather than the
+    // height reported under the centre: the centre moves off that spot onto the line of sight, and
+    // the clamp would then move the camera by the difference.
+    if (setCenterAltitudeKeepingView(groundOnLineOfSight().value_or(terrainCenterElevation))) {
         onUpdate();
     }
 }
@@ -503,6 +515,34 @@ void Map::Impl::onTerrainCenterElevationChanged(double elevationMeters) {
     if (clampCenterToTerrain(elevationMeters)) {
         onUpdate();
     }
+}
+
+std::optional<double> Map::Impl::groundOnLineOfSight() const {
+    if (!terrainElevationIndex) {
+        return std::nullopt;
+    }
+    const TerrainElevationIndex& index = *terrainElevationIndex;
+    const TransformState& state = transform.getState();
+    const auto surface = pickTerrainSurface(
+        state,
+        state.getEdgeInsets().getCenter(state.getSize().width, state.getSize().height),
+        [&](const LatLng& latLng) { return index.getElevation(latLng); },
+        index.getMaxElevation());
+    if (!surface) {
+        return std::nullopt;
+    }
+    // The pick answers wrapped. Unwrapped for the shortest path to the centre, as
+    // Map::pixelForLatLngOnTerrain does: the index keys the DEM tiles by unwrapped x.
+    LatLng ground = *surface;
+    ground.unwrapForShortestPath(transform.getLatLng());
+    return index.getElevation(ground);
+}
+
+bool Map::Impl::anchorCenterOnLineOfSight() {
+    const auto ground = groundOnLineOfSight();
+    // Under a metre setCenterAltitudeKeepingView moves nothing: the centre is on that ground.
+    return ground && (std::abs(*ground - transform.getState().getCenterAltitude()) < 1.0 ||
+                      setCenterAltitudeKeepingView(*ground));
 }
 
 bool Map::Impl::clampCenterToTerrain(double elevationMeters) {
