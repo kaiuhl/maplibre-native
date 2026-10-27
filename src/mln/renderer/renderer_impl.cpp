@@ -29,7 +29,6 @@
 #include <mln/renderer/bucket.hpp>      // drape signature: Bucket::getID content revision
 #include <mln/util/hash.hpp>            // drape signature: hash_combine
 #include <cmath>
-#include <limits>
 #include <map>
 #include <mln/renderer/render_terrain.hpp>
 #include <mln/renderer/dem_elevation_provider.hpp>
@@ -760,25 +759,17 @@ void Renderer::Impl::render(const RenderTree& renderTree, const std::shared_ptr<
         }
     }
 
-    // Report the rendered terrain height under the map centre. Only the render side has the
-    // DEM, so this is the channel; whether the camera acts on it is the map's call
-    // (Map::setCenterClampedToGround). Gated so a still map does not post a message a frame.
-    // The gate forgets the last height while there is no terrain, and holds it for the terrain it
-    // was sampled on only: the map returned the centre to sea level when the terrain went, and a
-    // terrain that comes back over the same ground has to report that ground again for the clamp to
-    // put the centre back on it. A style reload gives the renderer no frame without terrain to
-    // forget it on: the new style comes without terrain, the app sets it again once that has
-    // loaded, and the next frame draws the new terrain where the old one was. Where no DEM tile
-    // covers the centre yet, the height is reported as unknown rather than as sea level, which the
-    // clamp dropped the camera to until the heights arrived.
+    // The rendered terrain height under the map centre, for the clamp (Map::setCenterClampedToGround):
+    // posted when it changes, unknown where no DEM tile covers it yet, and afresh for a new terrain.
     if (auto* terrain = orchestrator.getRenderTerrain()) {
         const std::optional<double> centerElevation =
             terrain->getElevationForLatLng(updateParameters->transformState.getLatLng());
-        const double sampled = centerElevation.value_or(std::numeric_limits<double>::quiet_NaN());
         const auto& last = lastReportedCenterElevation;
-        if (!last || last->terrain != terrain->getImpl() || std::isnan(sampled) != std::isnan(last->elevation) ||
-            std::abs(sampled - last->elevation) > 0.25) {
-            lastReportedCenterElevation = ReportedCenterElevation{.terrain = terrain->getImpl(), .elevation = sampled};
+        if (!last || last->terrain != terrain->getImpl() ||
+            last->elevation.has_value() != centerElevation.has_value() ||
+            (centerElevation && std::abs(*centerElevation - *last->elevation) > 0.25)) {
+            lastReportedCenterElevation = ReportedCenterElevation{.terrain = terrain->getImpl(),
+                                                                  .elevation = centerElevation};
             observer->onTerrainCenterElevationChanged(centerElevation);
         }
     } else {
