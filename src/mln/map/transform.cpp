@@ -174,11 +174,10 @@ void Transform::easeTo(const CameraOptions& inputCamera, const AnimationOptions&
                             .withScalingInProgress(zoom != startZoom)
                             .withRotatingInProgress(bearing != startBearing));
     const EdgeInsets startEdgeInsets = state.getEdgeInsets();
-    const auto altitudeEase = std::make_shared<CenterAltitudeEase>(CenterAltitudeEase{
-        .start = startCenterAlt,
-        .target = centerAlt,
-        .progress = 0.0,
-        .center = camera.center ? std::optional<LatLng>(latLng) : std::nullopt});
+    const auto altitudeEase = std::make_shared<CenterAltitudeEase>(
+        CenterAltitudeEase{.from = startCenterAlt,
+                           .target = centerAlt,
+                           .center = camera.center ? std::optional<LatLng>(latLng) : std::nullopt});
 
     startTransition(
         camera,
@@ -189,7 +188,7 @@ void Transform::easeTo(const CameraOptions& inputCamera, const AnimationOptions&
             double frameZoom = util::interpolate(startZoom, zoom, t);
             state.setLatLngZoom(frameLatLng, frameZoom);
             altitudeEase->progress = t;
-            state.setCenterAltitude(util::interpolate(altitudeEase->start, altitudeEase->target, t));
+            state.setCenterAltitude(altitudeEase->at(t));
             if (bearing != startBearing) {
                 state.setBearing(util::wrap(util::interpolate(startBearing, bearing, t), -pi, pi));
             }
@@ -360,11 +359,10 @@ void Transform::flyTo(const CameraOptions& inputCamera,
         TransformStateProperties().withPanningInProgress(true).withScalingInProgress(true).withRotatingInProgress(
             bearing != startBearing));
     const EdgeInsets startEdgeInsets = state.getEdgeInsets();
-    const auto altitudeEase = std::make_shared<CenterAltitudeEase>(CenterAltitudeEase{
-        .start = startCenterAlt,
-        .target = centerAlt,
-        .progress = 0.0,
-        .center = camera.center ? std::optional<LatLng>(latLng) : std::nullopt});
+    const auto altitudeEase = std::make_shared<CenterAltitudeEase>(
+        CenterAltitudeEase{.from = startCenterAlt,
+                           .target = centerAlt,
+                           .center = camera.center ? std::optional<LatLng>(latLng) : std::nullopt});
 
     startTransition(
         camera,
@@ -388,8 +386,12 @@ void Transform::flyTo(const CameraOptions& inputCamera,
             // Convert to geographic coordinates and set the new viewpoint.
             LatLng frameLatLng = Projection::unproject(framePoint, startScale);
             state.setLatLngZoom(frameLatLng, frameZoom);
-            altitudeEase->progress = us;
-            state.setCenterAltitude(util::interpolate(altitudeEase->start, altitudeEase->target, us));
+            // The centre altitude moves with the centre along the path, and where the centre stays
+            // put (a tilt, turn or zoom in place, where the path is no length) with the time: by
+            // the path it would stay where it started until the last frame, then jump.
+            const double altitudeK = isClose ? k : us;
+            altitudeEase->progress = altitudeK;
+            state.setCenterAltitude(altitudeEase->at(altitudeK));
             if (bearing != startBearing) {
                 state.setBearing(util::wrap(util::interpolate(startBearing, bearing, k), -pi, pi));
             }
@@ -744,10 +746,16 @@ void Transform::retargetTransitionCenterAltitude(double altitudeMeters) {
         return;
     }
     // From the altitude reached at k, the rest of the way to the new target over what is left of
-    // the transition: start' + (target' - start')·k is where the transition is now.
-    const double current = util::interpolate(ease.start, ease.target, k);
-    ease.start = (current - k * altitudeMeters) / (1.0 - k);
+    // the transition.
+    ease.from = ease.at(k);
+    ease.fromProgress = k;
     ease.target = altitudeMeters;
+}
+
+double Transform::CenterAltitudeEase::at(double k) const {
+    // Kept as a fraction of what is left rather than as gl-js's extrapolated start, which a new
+    // target close to the end would put out of all proportion and the last frame then misses.
+    return fromProgress < 1.0 ? util::interpolate(from, target, (k - fromProgress) / (1.0 - fromProgress)) : target;
 }
 
 void Transform::setGestureInProgress(bool inProgress) {

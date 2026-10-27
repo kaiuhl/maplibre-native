@@ -859,6 +859,43 @@ TEST(TerrainCamera, EaseOntoGroundLoadedDuringTheMoveEndsWithoutAJump) {
     EXPECT_LT(largestStep, 400.0 * mercatorMetre);
 }
 
+// An animated move that leaves the centre where it is (a tilt, as the app gives one when 3D comes
+// on with the centre still at sea level) eases the centre altitude it was given over the move.
+// The path was no length, and the altitude, which moved by the distance along it, stayed put
+// until the last frame and then jumped there: the whole view jumped as the tilt ended.
+TEST(TerrainCamera, TiltInPlaceEasesTheCentreAltitude) {
+    TerrainTransitionTest test;
+    ASSERT_TRUE(test.settleOnPlateau());
+    // Off the ground, as a camera is when 3D has just come on; nothing moves it back while the
+    // centre stays put.
+    test.map.jumpTo(CameraOptions().withCenterAltitude(0.0));
+    test.renderFrame();
+    ASSERT_NEAR(test.altitude(), 0.0, 1.0);
+    const LatLng center = *test.map.getCameraOptions({}).center;
+
+    bool done = false;
+    double largestStep = 0.0;
+    double previous = test.altitude();
+    ASSERT_TRUE(test.runTransition(
+        [&](const AnimationOptions& animation) {
+            test.map.easeTo(CameraOptions().withCenter(center).withPitch(30.0).withCenterAltitude(plateauMeters),
+                            animation);
+        },
+        [&](bool finished) {
+            if (done) {
+                return;
+            }
+            const double altitude = test.altitude();
+            largestStep = std::max(largestStep, std::abs(altitude - previous));
+            previous = altitude;
+            done = finished;
+        }));
+
+    EXPECT_NEAR(test.altitude(), plateauMeters, 5.0);
+    // Eased: no frame of the 1000 m rise is a jump.
+    EXPECT_LT(largestStep, 400.0);
+}
+
 // The same for a free camera set while a transition runs: it stays where it was put.
 TEST(TerrainCamera, FreeCameraSetDuringATransitionIsKept) {
     TerrainTransitionTest test;

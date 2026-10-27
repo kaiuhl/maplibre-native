@@ -166,13 +166,16 @@ private:
 
     TimePoint transitionStart;
     Duration transitionDuration;
-    /// The centre altitude the running transition eases from and to, how far along it is (the
-    /// eased fraction its frame was last given), and the centre it was given.
+    /// The centre altitude the running transition eases to, how far along it is (the fraction its
+    /// frame was last given), and the centre it was given. A new target carries on from the
+    /// altitude reached at `fromProgress`, from `from`.
     struct CenterAltitudeEase {
-        double start = 0.0;
+        double from = 0.0;
         double target = 0.0;
+        double fromProgress = 0.0;
         double progress = 0.0;
         std::optional<LatLng> center;
+        double at(double k) const;
     };
     std::shared_ptr<CenterAltitudeEase> centerAltitudeEase;
     std::function<bool(const TimePoint)> transitionFrameFn;
