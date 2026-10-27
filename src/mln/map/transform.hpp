@@ -117,8 +117,9 @@ public:
     TimePoint getTransitionStart() const { return transitionStart; }
     Duration getTransitionDuration() const { return transitionDuration; }
     void cancelTransitions();
-    /// The centre a running transition was given to arrive at, as it arrives there; nullopt without
-    /// a transition or for one with no centre of its own (moveBy, rotateBy, a zoom around an anchor).
+    /// The centre a running transition was given to arrive at, as it arrives there (for moveBy, the
+    /// one the offset moves to); nullopt without a transition or for one given no centre (rotateBy,
+    /// a zoom or turn around an anchor).
     std::optional<LatLng> getTransitionCenter() const;
     /// Moves the centre altitude a running transition arrives at to `altitudeMeters`, carrying on
     /// from the altitude it has reached so that nothing jumps (gl-js's Camera._updateElevation).

@@ -489,16 +489,14 @@ void Map::Impl::easeTransitionOntoGround() {
     // the ground there as the heights for it arrive, as gl-js's Camera._updateElevation does, so
     // that the clamp has nothing left to move once the move ends: left at the altitude it was
     // given, the camera jumped onto ground that loaded during the move on the frame it ended.
-    if (!centerClampedToGround || !cameraSetToCenter || !terrainElevationIndex || !style->impl->getTerrain()) {
+    if (!centerClampedToGround || !cameraSetToCenter || !style->impl->getTerrain()) {
         return;
     }
-    auto center = transform.getTransitionCenter();
+    const auto center = transform.getTransitionCenter();
     if (!center) {
         return;
     }
-    // Unwrapped for the shortest path from the centre, as groundOnLineOfSight does.
-    center->unwrapForShortestPath(transform.getLatLng());
-    if (const auto ground = terrainElevationIndex->getElevation(*center)) {
+    if (const auto ground = groundAt(*center)) {
         transform.retargetTransitionCenterAltitude(*ground);
     }
 }
