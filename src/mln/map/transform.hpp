@@ -124,6 +124,9 @@ public:
     /// one the offset moves to); nullopt without a transition or for one given no centre (rotateBy,
     /// a zoom or turn around an anchor).
     std::optional<LatLng> getTransitionCenter() const;
+    /// The zoom a running transition with a centre of its own arrives at; nullopt where
+    /// getTransitionCenter is.
+    std::optional<double> getTransitionZoom() const;
     /// Moves the centre altitude a running transition arrives at to `altitudeMeters`, carrying on
     /// from the altitude it has reached so that nothing jumps (gl-js's Camera._updateElevation):
     /// over what is left of the transition, or, with less than 0.4 s left, over 0.4 s, the
@@ -183,7 +186,7 @@ private:
     /// The time the running transition's frame is drawing, or last drew: its start until the first.
     TimePoint transitionFrameTime;
     /// The centre altitude the running transition eases to, how far along it is (the fraction its
-    /// frame was last given), and the centre it was given. A new target carries on from the
+    /// frame was last given), and the centre and zoom it was given. A new target carries on from the
     /// altitude reached at `fromProgress`, from `from`. Set late, the progress is that of an ease
     /// over centerAltitudeEaseDuration from `clockStart` instead (clockProgress), the transition
     /// lingering past its end until it is through (lingersAt).
@@ -193,6 +196,7 @@ private:
         double fromProgress = 0.0;
         double progress = 0.0;
         std::optional<LatLng> center;
+        double zoom = 0.0;
         std::optional<TimePoint> clockStart;
         double at(double k, TimePoint now) const;
         double clockProgress(TimePoint now) const;

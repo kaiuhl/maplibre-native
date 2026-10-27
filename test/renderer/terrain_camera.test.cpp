@@ -24,6 +24,7 @@
 #include <cmath>
 #include <functional>
 #include <iterator>
+#include <optional>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -1260,6 +1261,244 @@ TEST(TerrainCamera, GroundAtSeaLevelIsClampedTo) {
     }
     ASSERT_TRUE(test.map.getTerrainElevation(test.westTarget));
     EXPECT_NEAR(test.altitude(), 0.0, 0.5);
+}
+
+namespace {
+
+// A DEM down to z12, which a view at z9 asks for, so that the tiles under the end of a long move are
+// nowhere near the view as it sets out.
+const char* fineTerrainStyle = R"STYLE({
+  "version": 8,
+  "sources": {
+    "dem": {
+      "type": "raster-dem",
+      "tiles": ["http://example.com/{z}-{x}-{y}.png"],
+      "encoding": "mapbox",
+      "maxzoom": 12,
+      "tileSize": 64
+    }
+  },
+  "terrain": {"source": "dem", "exaggeration": 1.0},
+  "layers": []
+})STYLE";
+
+// The longitude of a tile's west edge.
+double westEdge(const Resource::TileData& tile) {
+    return tile.x / std::pow(2.0, tile.z) * 360.0 - 180.0;
+}
+
+// Answers each tile request `latency` after it was made, as a network does, and keeps a list of
+// them. A request cancelled and made again starts over.
+class SlowTileSource : public StubFileSource {
+public:
+    SlowTileSource()
+        : StubFileSource(ResourceOptions::Default(), ClientOptions()) {}
+
+    std::unique_ptr<AsyncRequest> request(const Resource& resource, Callback callback) override {
+        const TimePoint madeAt = Clock::now();
+        if (resource.tileData) {
+            requested.push_back({*resource.tileData, madeAt});
+        }
+        // StubFileSource polls the response function it had when the request was made.
+        response = [this, madeAt](const Resource& asked) -> std::optional<Response> {
+            if (!asked.tileData || Clock::now() - madeAt < latency || (held && held(*asked.tileData))) {
+                return std::nullopt;
+            }
+            Response res;
+            res.data = std::make_shared<std::string>(tileAt(*asked.tileData));
+            return res;
+        };
+        return StubFileSource::request(resource, std::move(callback));
+    }
+
+    struct Request {
+        Resource::TileData tile;
+        TimePoint madeAt;
+    };
+    std::vector<Request> requested;
+    Duration latency = Milliseconds(600);
+    std::function<std::string(const Resource::TileData&)> tileAt;
+    // Tiles that don't arrive, however long they are waited for.
+    std::function<bool(const Resource::TileData&)> held;
+};
+
+// Continuous mode with the clamp on, as TerrainTransitionTest, over the fine DEM, at z9 over
+// Innsbruck. The tiles east of 19.5°E are a 2000 m plateau, the rest 1000 m. The move goes 8.6°
+// east along the same parallel, at the same zoom, onto the plateau.
+struct TerrainDestinationTest {
+    util::RunLoop loop;
+    std::shared_ptr<SlowTileSource> fileSource = std::make_shared<SlowTileSource>();
+    std::string lowTile = makeDEMTile(plateauMeters);
+    std::string highTile = makeDEMTile(eastPlateauMeters);
+    HeadlessFrontend frontend{{256, 256}, 1};
+    MapAdapter map;
+
+    TerrainDestinationTest()
+        : map(frontend,
+              MapObserver::nullObserver(),
+              fileSource,
+              MapOptions().withMapMode(MapMode::Continuous).withSize(frontend.getSize())) {
+        fileSource->tileAt = [this](const Resource::TileData& tile) {
+            return westEdge(tile) >= plateauWestEdge ? highTile : lowTile;
+        };
+        map.getStyle().loadJSON(fineTerrainStyle);
+        map.setCenterClampedToGround(true);
+        map.jumpTo(CameraOptions().withCenter(start).withZoom(9.0).withPitch(45.0));
+    }
+
+    void renderFrame() {
+        loop.runOnce();
+        frontend.renderFrame();
+    }
+
+    double altitude() { return map.getCameraOptions({}).centerAltitude.value_or(0.0); }
+
+    vec3 eye() const { return *map.getFreeCameraOptions().position; }
+
+    // Renders until the clamp has put the centre on the ground under Innsbruck.
+    bool settle() {
+        const auto deadline = Clock::now() + Seconds(10);
+        while (Clock::now() < deadline) {
+            renderFrame();
+            if (std::abs(altitude() - plateauMeters) < 0.5 && !map.isPanning()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Whether the DEM tile at `z` is the one under the end of the move.
+    bool underDestination(const Resource::TileData& tile, int z) const {
+        const Point<double> point = Projection::project(destination, z);
+        return tile.z == z && tile.x == static_cast<int32_t>(point.x) && tile.y == static_cast<int32_t>(point.y);
+    }
+
+    // How many times the DEM tile at `z` under the end of the move has been asked for.
+    long requestsUnderDestination(int z) const {
+        return std::count_if(fileSource->requested.begin(), fileSource->requested.end(), [&](const auto& request) {
+            return underDestination(request.tile, z);
+        });
+    }
+
+    bool requestedUnderDestination(int z) const { return requestsUnderDestination(z) > 0; }
+
+    // How far along the move the centre is, from 0 at the start to 1 at the end.
+    double progress() {
+        const double longitude = map.getCameraOptions({}).center->longitude();
+        return (longitude - start.longitude()) / (destination.longitude() - start.longitude());
+    }
+
+    // Eases (or with `fly`, flies) to the end of the move over 1.5 s at an even pace, renders a
+    // frame, and has `afterFirstFrame` check what it did; then renders until the move has ended.
+    // `groundAtEnd` and `eyeAtEnd` are the heights under the end and the camera on the frame the
+    // move ended.
+    template <typename Fn>
+    bool moveToDestination(Fn afterFirstFrame, bool fly = false) {
+        bool finished = false;
+        AnimationOptions animation(Milliseconds(1500));
+        // At an even pace: the default easing's slow approach would give the tiles there more time.
+        animation.easing.emplace(0.0, 0.0, 1.0, 1.0);
+        animation.transitionFinishFn = [&] {
+            finished = true;
+            groundAtEnd = map.getTerrainElevation(destination);
+            eyeAtEnd = eye();
+        };
+        if (fly) {
+            map.flyTo(CameraOptions().withCenter(destination), animation);
+        } else {
+            map.easeTo(CameraOptions().withCenter(destination), animation);
+        }
+        renderFrame();
+        afterFirstFrame();
+        const auto deadline = Clock::now() + Seconds(10);
+        while (!finished && Clock::now() < deadline) {
+            renderFrame();
+        }
+        return finished;
+    }
+
+    static constexpr double eastPlateauMeters = 2000.0;
+    static constexpr double plateauWestEdge = 19.5;
+    const LatLng start{47.2692, 11.4041};
+    const LatLng destination{47.2692, 20.0};
+    std::optional<double> groundAtEnd;
+    vec3 eyeAtEnd{};
+};
+
+} // namespace
+
+// A move to ground far outside the view (an easeTo across the Cascades at one zoom, on a cold cache)
+// asked for the DEM tiles there only once the view reached them, in its last moments, and they
+// arrived after it ended: it came to rest over ground whose heights it didn't have, and the clamp
+// held the centre off the ground until they came, seconds later. The tiles under the centre it
+// arrives at are asked for as it sets out instead, at the zoom the DEM is prefetched at and at the
+// view's, so that, answered within the move, they are in when it ends, and it ends on the ground.
+TEST(TerrainCamera, MoveAsksForTheGroundAtItsEndAsItSetsOut) {
+    TerrainDestinationTest test;
+    ASSERT_TRUE(test.settle());
+    ASSERT_FALSE(test.requestedUnderDestination(8));
+    ASSERT_FALSE(test.requestedUnderDestination(12));
+
+    // Both tiles are asked for on the move's first frame: z8, four zoom levels above the view's
+    // (Map::setPrefetchZoomDelta), and z12, the view's.
+    ASSERT_TRUE(test.moveToDestination([&] {
+        EXPECT_LT(test.progress(), 0.1);
+        EXPECT_TRUE(test.requestedUnderDestination(8));
+        EXPECT_TRUE(test.requestedUnderDestination(12));
+    }));
+
+    // The heights under the end were in when the move ended, and it ended on them: there was nothing
+    // left for the clamp to move.
+    ASSERT_TRUE(test.groundAtEnd) << "no heights under the end of the move when it ended";
+    EXPECT_NEAR(*test.groundAtEnd, TerrainDestinationTest::eastPlateauMeters, 1.0);
+    for (int i = 0; i < 10; ++i) {
+        test.renderFrame();
+    }
+    EXPECT_NEAR(test.altitude(), TerrainDestinationTest::eastPlateauMeters, 5.0);
+    const vec3 eye = test.eye();
+    for (int i = 0; i < 3; ++i) {
+        EXPECT_NEAR(eye[i], test.eyeAtEnd[i], mercatorMetre) << "axis " << i;
+    }
+}
+
+// The coarse tile is there for when the view's is slow: on its own it has the heights under the end
+// of the move, and the move ends on them.
+TEST(TerrainCamera, MoveEndsOnTheCoarseTileWhereTheFineOneIsLate) {
+    TerrainDestinationTest test;
+    test.fileSource->held = [](const Resource::TileData& tile) {
+        return tile.z == 12 && westEdge(tile) >= TerrainDestinationTest::plateauWestEdge;
+    };
+    ASSERT_TRUE(test.settle());
+
+    ASSERT_TRUE(test.moveToDestination([] {}));
+    ASSERT_TRUE(test.requestedUnderDestination(12));
+
+    ASSERT_TRUE(test.groundAtEnd) << "no heights under the end of the move when it ended";
+    EXPECT_NEAR(*test.groundAtEnd, TerrainDestinationTest::eastPlateauMeters, 1.0);
+    for (int i = 0; i < 10; ++i) {
+        test.renderFrame();
+    }
+    EXPECT_NEAR(test.altitude(), TerrainDestinationTest::eastPlateauMeters, 5.0);
+}
+
+// A flight zooms out and back in on the way, and the view's tiles coming down onto the end of it
+// lie below the coarse tile asked for there, which stood in for them while it loaded: as an optional
+// stand-in, which cancelled its request, and the next frame asked for it again. Asked for every
+// frame, it never arrived. It is asked for once.
+TEST(TerrainCamera, FlightAsksForTheGroundAtItsEndOnce) {
+    TerrainDestinationTest test;
+    // The coarse tile is still on its way as the flight comes down onto it.
+    test.fileSource->held = [&](const Resource::TileData& tile) {
+        return test.underDestination(tile, 8);
+    };
+    ASSERT_TRUE(test.settle());
+
+    ASSERT_TRUE(test.moveToDestination([] {}, /*fly=*/true));
+    EXPECT_EQ(test.requestsUnderDestination(8), 1);
+    EXPECT_EQ(test.requestsUnderDestination(12), 1);
+    // The view's tile there arrived during the flight, and it ended on the ground.
+    ASSERT_TRUE(test.groundAtEnd) << "no heights under the end of the move when it ended";
+    EXPECT_NEAR(*test.groundAtEnd, TerrainDestinationTest::eastPlateauMeters, 1.0);
 }
 
 // The same for a free camera set while a transition runs: it stays where it was put.

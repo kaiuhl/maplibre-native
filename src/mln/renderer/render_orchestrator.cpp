@@ -534,6 +534,10 @@ std::unique_ptr<RenderTree> RenderOrchestrator::createRenderTree(
         const bool isDEMSource = terrainEnabled && sourceImpl->id == renderTerrain->getSourceID();
         tileParameters.retainAncestorLevels = isDEMSource ? RenderTerrain::demAncestorLevels : 0;
         tileParameters.coverCenter = isDEMSource;
+        // It also loads the heights where a running animated move arrives, from the start of the
+        // move (see TileParameters::destinationCenter).
+        tileParameters.destinationCenter = isDEMSource ? updateParameters->transitionCenter : std::nullopt;
+        tileParameters.destinationZoom = updateParameters->transitionZoom;
         source->update(sourceImpl, filteredLayersForSource, sourceNeedsRendering, sourceNeedsRelayout, tileParameters);
         filteredLayersForSource.clear();
 

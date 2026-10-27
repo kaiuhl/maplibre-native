@@ -209,7 +209,8 @@ void Transform::easeTo(const CameraOptions& inputCamera, const AnimationOptions&
         duration,
         {.from = startCenterAlt,
          .target = centerAlt,
-         .center = camera.center ? std::optional<LatLng>(latLng) : std::nullopt});
+         .center = camera.center ? std::optional<LatLng>(latLng) : std::nullopt,
+         .zoom = zoom});
 }
 
 /** This method implements an “optimal path” animation, as detailed in:
@@ -407,7 +408,8 @@ void Transform::flyTo(const CameraOptions& inputCamera,
         duration,
         {.from = startCenterAlt,
          .target = centerAlt,
-         .center = camera.center ? std::optional<LatLng>(latLng) : std::nullopt});
+         .center = camera.center ? std::optional<LatLng>(latLng) : std::nullopt,
+         .zoom = zoom});
 }
 
 // MARK: - Position
@@ -731,6 +733,10 @@ void Transform::cancelTransitions() {
 
 std::optional<LatLng> Transform::getTransitionCenter() const {
     return inTransition() ? centerAltitudeEase.center : std::nullopt;
+}
+
+std::optional<double> Transform::getTransitionZoom() const {
+    return getTransitionCenter() ? std::optional<double>(centerAltitudeEase.zoom) : std::nullopt;
 }
 
 void Transform::retargetTransitionCenterAltitude(double altitudeMeters) {
