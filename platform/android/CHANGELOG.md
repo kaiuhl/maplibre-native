@@ -8,6 +8,7 @@
 
 ### 🐞 Bug fixes
 
+- Fix PMTiles tiles intermittently failing to load with `Error parsing PMTiles directory: map::at: key not found` after several requests loaded the same directory at once.
 - With 3D terrain on and the centre clamp enabled, the clamp no longer cancels a running camera animation; the camera is anchored to the ground once the animation ends ([#4768](https://github.com/maplibre/maplibre-native/pull/4768)).
 
 ## 13.7.1
