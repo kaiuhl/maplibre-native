@@ -28,6 +28,8 @@
 #include <mln/renderer/layer_group.hpp> // drape signature: TileLayerGroup::visitDrawables
 #include <mln/renderer/bucket.hpp>      // drape signature: Bucket::getID content revision
 #include <mln/util/hash.hpp>            // drape signature: hash_combine
+#include <cmath>
+#include <limits>
 #include <map>
 #include <mln/renderer/render_terrain.hpp>
 #include <mln/renderer/dem_elevation_provider.hpp>
@@ -763,12 +765,16 @@ void Renderer::Impl::render(const RenderTree& renderTree, const std::shared_ptr<
     // (Map::setCenterClampedToGround). Gated so a still map does not post a message a frame.
     // The gate forgets the last height while there is no terrain: the map returned the centre to
     // sea level when the terrain went, and a terrain that comes back over the same ground (a style
-    // reload) has to report that ground again for the clamp to put the centre back on it.
+    // reload) has to report that ground again for the clamp to put the centre back on it. Where
+    // no DEM tile covers the centre yet, the height is reported as unknown rather than as sea
+    // level, which the clamp dropped the camera to until the heights arrived.
     if (auto* terrain = orchestrator.getRenderTerrain()) {
-        const double centerElevation =
-            terrain->getElevationForLatLng(updateParameters->transformState.getLatLng()).value_or(0.0);
-        if (!lastReportedCenterElevation || std::abs(centerElevation - *lastReportedCenterElevation) > 0.25) {
-            lastReportedCenterElevation = centerElevation;
+        const std::optional<double> centerElevation =
+            terrain->getElevationForLatLng(updateParameters->transformState.getLatLng());
+        const double sampled = centerElevation.value_or(std::numeric_limits<double>::quiet_NaN());
+        if (!lastReportedCenterElevation || std::isnan(sampled) != std::isnan(*lastReportedCenterElevation) ||
+            std::abs(sampled - *lastReportedCenterElevation) > 0.25) {
+            lastReportedCenterElevation = sampled;
             observer->onTerrainCenterElevationChanged(centerElevation);
         }
     } else {

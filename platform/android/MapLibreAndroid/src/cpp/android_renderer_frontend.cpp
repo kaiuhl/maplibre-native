@@ -63,7 +63,7 @@ public:
 
     void onDidFinishRenderingMap() override { delegate.invoke(&RendererObserver::onDidFinishRenderingMap); }
 
-    void onTerrainCenterElevationChanged(double elevationMeters) override {
+    void onTerrainCenterElevationChanged(std::optional<double> elevationMeters) override {
         delegate.invoke(&RendererObserver::onTerrainCenterElevationChanged, elevationMeters);
     }
 
