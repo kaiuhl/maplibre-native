@@ -340,7 +340,10 @@ RenderTarget::RenderResult RenderTarget::render(RenderOrchestrator& orchestrator
         // drawable set changing (contentHash) or crossing an integer zoom - is not
         // "worse" and falls through to re-render. The target's lifetime bounds
         // staleness: when its terrain tile leaves the cover it is destroyed.
-        if (coverage.worseThan(bakedCoverage)) {
+        // A draped layer's look changing is not "worse" content: the bake it would keep
+        // shows the old look, so it re-renders even if a tile is briefly coarser.
+        const bool lookChanged = coverage.drapedPaintEpoch != bakedCoverage.drapedPaintEpoch;
+        if (!lookChanged && coverage.worseThan(bakedCoverage)) {
             // Keeping the already-baked (better) content: record that at this
             // signature the decision was to hold, so future identical frames skip
             // the scan too. A real change (drawable set, zoom, properties) moves the
