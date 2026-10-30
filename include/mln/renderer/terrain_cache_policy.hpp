@@ -80,5 +80,23 @@ inline bool drapeFallbackStrictlyWorse(const std::vector<DrapeGroupFallback>& no
     return worse;
 }
 
+/// A draped layer group's deficit on a target (`DrapeGroupFallback::deficit`). Exact or deeper
+/// drawables cover it. So does an exact or deeper tile that is loaded, complete and holds nothing
+/// for the layer: its data is gone, not on its way. Deleting the last feature of a GeoJSON line in
+/// a tile (a recording discarded, a track deleted) leaves exactly that, and counting it as no
+/// coverage read the deletion as a reload losing content, so the target held the deleted line for
+/// as long as it lived. Otherwise an ancestor `ancestorLevelsUp` levels up (-1 for none) stands in,
+/// drawn or emptied the same way.
+inline int16_t drapeGroupDeficit(bool exactDrawn, bool exactEmptied, int16_t ancestorLevelsUp) {
+    if (exactDrawn || exactEmptied) {
+        return 0;
+    }
+    return ancestorLevelsUp >= 0 ? ancestorLevelsUp : -1;
+}
+
+/// What an emptied tile contributes to a group's contents: its id under a seed no drawn tile's
+/// hash starts from, so emptying a tile always moves the contents.
+constexpr std::size_t drapeEmptiedTileSeed = 0x9e3779b97f4a7c15ull;
+
 } // namespace terrain
 } // namespace mln

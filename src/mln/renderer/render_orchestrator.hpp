@@ -186,12 +186,14 @@ public:
         return std::move(frameRenderedFeatures);
     }
 
+    /// The render layer of a style layer id; the drape cache reads its cover set.
+    const RenderLayer* getRenderLayer(const std::string& id) const;
+
 private:
     bool isLoaded() const;
     bool hasTransitions(TimePoint) const;
 
     RenderLayer* getRenderLayer(const std::string& id);
-    const RenderLayer* getRenderLayer(const std::string& id) const;
 
     void queryRenderedSymbols(std::unordered_map<std::string, std::vector<Feature>>& resultsByLayer,
                               const ScreenLineString& geometry,

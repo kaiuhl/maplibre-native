@@ -86,3 +86,27 @@ TEST(TerrainCachePolicy, ChangedDataIsNotWorse) {
     lost[0].contents = 5;
     EXPECT_TRUE(drapeFallbackStrictlyWorse(lost, had));
 }
+
+TEST(TerrainCachePolicy, EmptiedTileCoversItsTarget) {
+    // Drawn, or loaded and holding nothing for the layer: exact coverage either way.
+    EXPECT_EQ(0, drapeGroupDeficit(true, false, -1));
+    EXPECT_EQ(0, drapeGroupDeficit(false, true, -1));
+    EXPECT_EQ(0, drapeGroupDeficit(false, true, 3));
+    // Neither: an ancestor stands in, or nothing does.
+    EXPECT_EQ(3, drapeGroupDeficit(false, false, 3));
+    EXPECT_EQ(-1, drapeGroupDeficit(false, false, -1));
+}
+
+TEST(TerrainCachePolicy, DeletingTheLastFeatureIsNotWorse) {
+    // The regression: a recording discarded in 3D on a quiet map. Its line was the only feature of
+    // its source in the tile, so the tile reloaded with no bucket for the layer. Read as no coverage
+    // (deficit -1) that was a reload losing content, and the target held the deleted line.
+    auto baked = groups({0, 0});
+    baked[1].contents = 41; // the line, drawn
+    auto emptied = groups({0, drapeGroupDeficit(false, true, -1)});
+    emptied[1].contents = 77; // the same tile, loaded empty
+    EXPECT_FALSE(drapeFallbackStrictlyWorse(emptied, baked));
+    // A tile still reloading is not emptied: it has no coverage and the bake is held, as before.
+    auto reloading = groups({0, drapeGroupDeficit(false, false, -1)});
+    EXPECT_TRUE(drapeFallbackStrictlyWorse(reloading, baked));
+}

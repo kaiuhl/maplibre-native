@@ -11,6 +11,7 @@
 #include <mln/renderer/renderer.hpp>
 #include <mln/style/layers/custom_layer.hpp>
 #include <mln/style/layers/custom_layer_render_parameters.hpp>
+#include <mln/style/sources/geojson_source.hpp>
 #include <mln/style/style.hpp>
 #include <mln/style/terrain.hpp>
 #include <mln/util/constants.hpp>
@@ -1844,6 +1845,86 @@ TEST(TerrainDrape, MasksAreDrawnOnlyForTilesOverlappingTheTarget) {
     // handful of them at most.
     EXPECT_LE(counts.drawn, 4 * counts.targets)
         << counts.drawn << " masks over " << counts.targets << " targets, " << counts.skipped << " skipped";
+}
+
+// Deleting the last feature of a draped source re-bakes the targets it covered, on a quiet map.
+// The tiles reload holding nothing for the layer, and the drape cache read that as a reload
+// losing content: the anti-flicker hold kept the deleted fill in every target for as long as the
+// target lived (a recording discarded in 3D left its line drawn). And once re-baked, the emptied
+// tiles leave the targets alone, frame after frame.
+namespace {
+// Renders `style` until its fill is drawn into drapes, empties the fill's source, and returns the
+// targets re-baked and the masks drawn in the frames after (then, separately, in a few more).
+struct EmptiedCounts {
+    int drawnBefore = 0, settledBefore = 0;
+    DrapeMaskCounts emptied;
+    int settledAfter = 0;
+};
+EmptiedCounts emptyDrapedSource(const std::string& style) {
+    util::RunLoop loop;
+    auto fileSource = std::make_shared<StubFileSource>(ResourceOptions::Default(), ClientOptions());
+    const std::string tile = makeFlatDEMTile();
+    fileSource->tileResponse = [&](const Resource&) {
+        Response res;
+        res.data = std::make_shared<std::string>(tile);
+        return res;
+    };
+    HeadlessFrontend frontend{{390, 844}, 1};
+    MapAdapter map(frontend,
+                   MapObserver::nullObserver(),
+                   fileSource,
+                   MapOptions().withMapMode(MapMode::Static).withSize(frontend.getSize()));
+    map.getStyle().loadJSON(style);
+    map.setBounds(BoundOptions().withMaxPitch(85.0));
+    map.jumpTo(CameraOptions().withCenter(LatLng{47.2692, 11.4041}).withZoom(5.0).withPitch(75.0));
+
+    gfx::RenderingStats before;
+    // Re-rendered targets and masks drawn over `frames` frames, nothing else touched.
+    const auto render = [&](int frames) {
+        DrapeMaskCounts counts;
+        for (int i = 0; i < frames; ++i) {
+            loop.runOnce();
+            const auto stats = frontend.render(map).stats;
+            counts.targets += stats.numDrapeTargetsRendered - before.numDrapeTargetsRendered;
+            counts.drawn += stats.numDrapeMasksDrawn - before.numDrapeMasksDrawn;
+            before = stats;
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+        return counts;
+    };
+    EmptiedCounts counts;
+    counts.drawnBefore = render(30).drawn;
+    counts.settledBefore = render(6).targets;
+    auto* area = static_cast<style::GeoJSONSource*>(map.getStyle().getSource("area"));
+    if (area) {
+        area->setGeoJSON(mapbox::geojson::feature_collection{});
+        counts.emptied = render(30);
+        counts.settledAfter = render(6).targets;
+    }
+    return counts;
+}
+
+void expectEmptiedRebakes(const EmptiedCounts& counts) {
+    ASSERT_GT(counts.drawnBefore, 0) << "the fill never drew into a drape";
+    ASSERT_EQ(counts.settledBefore, 0) << "a settled map re-baked with nothing changed";
+    EXPECT_GT(counts.emptied.targets, 0) << "the deleted fill was held in its targets";
+    EXPECT_EQ(counts.emptied.drawn, 0) << "a re-baked target still drew the deleted fill";
+    EXPECT_EQ(counts.settledAfter, 0) << "emptied tiles kept re-baking their targets";
+}
+} // namespace
+
+// The source's tiles as deep as the targets or deeper.
+TEST(TerrainDrape, EmptyingADrapedSourceRebakesItsTargets) {
+    expectEmptiedRebakes(emptyDrapedSource(drapedFillStyle));
+}
+
+// And coarser: a source capped below the terrain's tiles (an app's line source at z14 over z15
+// terrain) stands in as an ancestor of each target, emptied the same way.
+TEST(TerrainDrape, EmptyingACoarserDrapedSourceRebakesItsTargets) {
+    std::string style = drapedFillStyle;
+    const std::string geojson = R"("type": "geojson",)";
+    style.replace(style.find(geojson), geojson.size(), geojson + R"( "maxzoom": 2,)");
+    expectEmptiedRebakes(emptyDrapedSource(style));
 }
 
 // Where the source has no DEM for a tile, the terrain draws its parent's, and the query reads that

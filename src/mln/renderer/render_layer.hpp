@@ -131,6 +131,9 @@ public:
 
     int32_t getLayerIndex() const noexcept;
 
+    /// The current cover set, including tiles that hold nothing for this layer.
+    const RenderTiles& getRenderTiles() const { return renderTiles; }
+
     /// Checks whether this layer needs to be rendered in the given render pass.
     bool hasRenderPass(RenderPass) const;
 
