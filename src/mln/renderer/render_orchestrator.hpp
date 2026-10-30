@@ -171,6 +171,13 @@ public:
 
     const ZoomHistory& getZoomHistory() const { return zoomHistory; }
 
+    /// Moves whenever what a draped layer draws changes without its tiles changing: a
+    /// paint, layout or visibility change, a running transition, a global-state change it
+    /// depends on, or a feature state. Not a zoom-only re-evaluation, so a pinch within a
+    /// level still reuses the baked drapes, and not a change to an undraped layer (a label
+    /// fading in). The drape cache folds it in (RenderTarget::computeDrapeCoverage).
+    uint64_t getDrapedPaintEpoch() const { return drapedPaintEpoch; }
+
     RenderSource* getRenderSource(const std::string& id) const;
 
     RenderTerrain* getRenderTerrain() const { return renderTerrain.get(); }
@@ -215,6 +222,7 @@ private:
     RendererObserver* observer;
 
     ZoomHistory zoomHistory;
+    uint64_t drapedPaintEpoch = 0;
     TransformState transformState;
 
     std::shared_ptr<GlyphManager> glyphManager;

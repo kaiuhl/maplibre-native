@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -33,6 +34,9 @@ struct DrapeGroupFallback {
     int32_t layerIndex = 0;
     /// -1 = no usable tile, 0 = exact or deeper tiles, n > 0 = only an ancestor n zoom levels up
     int16_t deficit = -1;
+    /// What the group draws into the target: its overlapping tiles and their buckets, summed.
+    /// Moves when a tile's data is replaced in place, not when it merely reloads the same bucket.
+    std::size_t contents = 0;
 };
 
 /// Whether the content a drape target would render now (`now`) is strictly worse than what it
@@ -43,7 +47,8 @@ struct DrapeGroupFallback {
 /// Compared per layer group, not as a sum over groups: a sum lets one group's regression outweigh
 /// another group's improvement, and the improvement - typically hillshade arriving from its real
 /// DEM tile - is then discarded for as long as the target lives. Group sets that differ (style
-/// change) are not comparable and never count as worse.
+/// change) are not comparable and never count as worse, and neither is a group whose coverage
+/// held but whose data changed.
 inline bool drapeFallbackStrictlyWorse(const std::vector<DrapeGroupFallback>& now,
                                        const std::vector<DrapeGroupFallback>& baked) {
     if (now.size() != baked.size()) {
@@ -57,6 +62,13 @@ inline bool drapeFallbackStrictlyWorse(const std::vector<DrapeGroupFallback>& no
             return false;
         }
         if (n.deficit == b.deficit) {
+            // Same coverage, different data: a source changed what it draws here (a line
+            // selected, a route extended, a recording grown). That is new content, not lost
+            // detail, so a group elsewhere dropping a stale ancestor fallback at the same time
+            // must not keep the old bake - the target would show the old data indefinitely.
+            if (n.deficit >= 0 && n.contents != b.contents) {
+                return false;
+            }
             continue;
         }
         const bool improved = (b.deficit < 0) || (n.deficit >= 0 && n.deficit < b.deficit);

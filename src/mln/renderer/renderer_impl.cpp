@@ -364,6 +364,7 @@ void Renderer::Impl::render(const RenderTree& renderTree, const std::shared_ptr<
             // every bucket rebuild/fade (consistent with RenderTarget::computeDrapeCoverage).
             std::size_t signature = 0;
             std::size_t drapedGroupCount = 0;
+            const uint64_t paintEpoch = drapedPaintEpochFor(orchestrator);
             std::vector<std::pair<UnwrappedTileID, std::size_t>> drapedTiles;
             drapedTiles.reserve(1024);
             orchestrator.visitLayerGroups([&](LayerGroupBase& layerGroup) {
@@ -400,6 +401,9 @@ void Renderer::Impl::render(const RenderTree& renderTree, const std::shared_ptr<
             });
             util::hash_combine(signature, drapedGroupCount);
             util::hash_combine(signature, zoomLevel);
+            // A draped layer whose look changed (paint, visibility, transition, feature
+            // state) re-bakes the drapes it draws into and re-runs its tweakers.
+            util::hash_combine(signature, paintEpoch);
             parameters.drapedContentSignature = signature;
             // Also treat the content as changed on the frame the drape cover reappears (fresh
             // targets after terrain was off / had an empty cover): the draped drawables still
@@ -432,6 +436,7 @@ void Renderer::Impl::render(const RenderTree& renderTree, const std::shared_ptr<
                     }
                     util::hash_combine(sig, drapedGroupCount);
                     util::hash_combine(sig, zoomLevel);
+                    util::hash_combine(sig, paintEpoch);
                     perTargetDrapeSignature[*tid] = sig;
                 });
             }

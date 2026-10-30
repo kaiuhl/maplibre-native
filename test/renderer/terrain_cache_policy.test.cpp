@@ -67,3 +67,22 @@ TEST(TerrainCachePolicy, DifferentGroupSetsAreNotComparable) {
     renumbered[1].layerIndex = 7;
     EXPECT_FALSE(drapeFallbackStrictlyWorse(renumbered, groups({0, 0})));
 }
+
+TEST(TerrainCachePolicy, ChangedDataIsNotWorse) {
+    // The regression: a GeoJSON line selected in 3D (its tile's bucket replaced in place) while
+    // a landcover group dropped the z11 ancestor it had been standing in with. The loss alone
+    // read as worse and the target kept the unselected line for as long as it lived.
+    auto now = groups({0, -1});
+    auto baked = groups({0, 4});
+    now[0].contents = 2;
+    baked[0].contents = 1;
+    EXPECT_FALSE(drapeFallbackStrictlyWorse(now, baked));
+    // Same data, same loss: still the brief reload the hold exists for.
+    now[0].contents = 1;
+    EXPECT_TRUE(drapeFallbackStrictlyWorse(now, baked));
+    // A group with no usable tile has no data to compare.
+    auto lost = groups({-1, -1});
+    auto had = groups({-1, 0});
+    lost[0].contents = 5;
+    EXPECT_TRUE(drapeFallbackStrictlyWorse(lost, had));
+}
