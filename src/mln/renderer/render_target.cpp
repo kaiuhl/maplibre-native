@@ -9,13 +9,17 @@
 #include <mln/renderer/layer_group.hpp>
 #include <mln/renderer/layer_tweaker.hpp>
 #include <mln/renderer/paint_parameters.hpp>
+#include <mln/renderer/render_layer.hpp>
 #include <mln/renderer/render_orchestrator.hpp>
+#include <mln/renderer/render_tile.hpp>
+#include <mln/tile/tile.hpp>
 #include <mln/renderer/render_tree.hpp>
 #include <mln/shaders/layer_ubo.hpp>
 #include <mln/util/hash.hpp>
 #include <mln/util/string.hpp>
 
 #include <cmath>
+#include <utility>
 
 namespace mln {
 
@@ -207,15 +211,46 @@ RenderTarget::DrapeCoverage RenderTarget::computeDrapeCoverage(RenderOrchestrato
             coverage.contentHash += tileHash;
             groupContents += tileHash;
         });
+        // No drawable here may still be coverage: a tile that is loaded, complete and holds
+        // nothing for the layer has had its data emptied (the last feature of a GeoJSON line
+        // deleted), which is new content, not a reload losing it (terrain::drapeGroupDeficit).
+        // Exact or deeper, or an ancestor standing in, as a drawn tile would. A tile still
+        // loading or reloading is not complete and stays no coverage, so the anti-flicker hold
+        // keeps the bake as before.
+        bool emptied = false;
+        if (!haveExactOrDescendant) {
+            if (const auto* layer = std::as_const(orchestrator).getRenderLayer(layerGroup.getName())) {
+                if (const auto& tiles = layer->getRenderTiles()) {
+                    for (const RenderTile& tile : *tiles) {
+                        const UnwrappedTileID& unwrapped = tile.id;
+                        const bool exact = unwrapped == *drapeTileID || unwrapped.isChildOf(*drapeTileID);
+                        const bool ancestor = !exact && drapeTileID->isChildOf(unwrapped);
+                        if (!(exact || ancestor) || !tile.getTile().isComplete() || tile.getBucket(*layer->baseImpl)) {
+                            continue;
+                        }
+                        if (exact) {
+                            emptied = true;
+                        } else if (!bestAncestor || unwrapped.canonical.z > bestAncestor->canonical.z) {
+                            bestAncestor = unwrapped;
+                        }
+                        std::size_t tileHash = terrain::drapeEmptiedTileSeed;
+                        util::hash_combine(tileHash, unwrapped.wrap);
+                        util::hash_combine(tileHash, unwrapped.canonical.z);
+                        util::hash_combine(tileHash, unwrapped.canonical.x);
+                        util::hash_combine(tileHash, unwrapped.canonical.y);
+                        coverage.contentHash += tileHash;
+                        groupContents += tileHash;
+                    }
+                }
+            }
+        }
         // Only the coarsest standalone fallback counts as lost detail; when an exact or
         // deeper tile is present the ancestor is clipped away by the tile masks and costs
         // nothing.
-        int16_t deficit = -1;
-        if (haveExactOrDescendant) {
-            deficit = 0;
-        } else if (bestAncestor) {
-            deficit = static_cast<int16_t>(drapeTileID->canonical.z - bestAncestor->canonical.z);
-        }
+        const int16_t deficit = terrain::drapeGroupDeficit(
+            haveExactOrDescendant,
+            emptied,
+            bestAncestor ? static_cast<int16_t>(drapeTileID->canonical.z - bestAncestor->canonical.z) : int16_t{-1});
         coverage.groups.push_back({layerGroup.getLayerIndex(), deficit, groupContents});
     });
     return coverage;
