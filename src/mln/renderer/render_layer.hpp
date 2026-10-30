@@ -98,6 +98,9 @@ protected:
     RenderLayer(Immutable<style::LayerProperties>);
 
 public:
+    /// Whether this layer draws into the terrain drapes rather than straight to the screen.
+    bool rendersToTerrain() const;
+
     virtual ~RenderLayer() = default;
 
     const std::string& getId() const;

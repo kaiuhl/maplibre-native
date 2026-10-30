@@ -112,10 +112,15 @@ void RenderTarget::updateDrapeGlobalUBO(const shaders::GlobalPaintParamsUBO& par
     }
 }
 
+uint64_t drapedPaintEpochFor(const RenderOrchestrator& orchestrator) {
+    return orchestrator.getDrapedPaintEpoch();
+}
+
 RenderTarget::DrapeCoverage RenderTarget::computeDrapeCoverage(RenderOrchestrator& orchestrator,
                                                                const PaintParameters& parameters) const {
     DrapeCoverage coverage;
     coverage.totalGroups = 0;
+    coverage.drapedPaintEpoch = drapedPaintEpochFor(orchestrator);
     // Integer tile-zoom only, NOT the continuous zoom: a drape tile's rasterized content
     // is stable within a zoom level, so a pinch within one level must not invalidate it
     // every frame. Crossing an integer zoom changes the covering tiles (contentHash) and

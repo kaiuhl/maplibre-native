@@ -403,6 +403,12 @@ std::unique_ptr<RenderTree> RenderOrchestrator::createRenderTree(
 
         if (layerAddedOrChanged || zoomChangedAndMatters || globalStateChangedAndMatters ||
             evaluationParameters.hasCrossfade || layer.hasTransition()) {
+            // A drape baked before this evaluation no longer shows the layer as it now
+            // looks, unless the zoom alone moved it (see getDrapedPaintEpoch).
+            if ((layerAddedOrChanged || globalStateChangedAndMatters || layer.hasTransition()) &&
+                layer.rendersToTerrain()) {
+                drapedPaintEpoch++;
+            }
             const auto previousMask = layer.evaluatedProperties->constantsMask();
             layer.evaluate(evaluationParameters);
             if (previousMask != layer.evaluatedProperties->constantsMask()) {
@@ -911,6 +917,7 @@ void RenderOrchestrator::setFeatureState(const std::string& sourceID,
 
     if (RenderSource* renderSource = getRenderSource(sourceID)) {
         renderSource->setFeatureState(sourceLayerID, featureID, state);
+        drapedPaintEpoch++;
     }
 }
 
@@ -933,6 +940,7 @@ void RenderOrchestrator::removeFeatureState(const std::string& sourceID,
 
     if (RenderSource* renderSource = getRenderSource(sourceID)) {
         renderSource->removeFeatureState(sourceLayerID, featureID, stateKey);
+        drapedPaintEpoch++;
     }
 }
 

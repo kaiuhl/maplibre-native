@@ -38,6 +38,9 @@ class RenderTree;
 using LayerGroupBasePtr = std::shared_ptr<LayerGroupBase>;
 
 /// Render target class
+/// The draped-paint epoch the drape cache keys on (RenderOrchestrator::getDrapedPaintEpoch).
+uint64_t drapedPaintEpochFor(const RenderOrchestrator&);
+
 class RenderTarget {
 public:
     RenderTarget(gfx::Context& context, const Size size, const gfx::TextureChannelDataType type, bool stencil);
@@ -144,8 +147,13 @@ protected:
         /// the drape cache entirely - all visible drape targets re-rendered every frame while
         /// panning (measured ~4x overdraw / 11fps -> 1x / 44fps once removed). gl-js keys its
         /// terrain RTT cache on tile coverage + zoom, never on paint changes.
+        /// RenderOrchestrator::getDrapedPaintEpoch when this was taken: only draped layers'
+        /// own look changes move it, so labels fading elsewhere leave the cache alone.
+        uint64_t drapedPaintEpoch = 0;
+
         bool sameContentAs(const DrapeCoverage& other) const {
-            return totalGroups == other.totalGroups && contentHash == other.contentHash && zoom == other.zoom;
+            return totalGroups == other.totalGroups && contentHash == other.contentHash && zoom == other.zoom &&
+                   drapedPaintEpoch == other.drapedPaintEpoch;
         }
         /// Whether this would draw less than `other`: no layer group improved, and at least one
         /// lost its content or fell back to a coarser ancestor. Compared per group, not summed

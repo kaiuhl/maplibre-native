@@ -389,4 +389,8 @@ std::optional<RenderLayer::NDCBound> RenderLayer::computeFeatureNDCBound(
     return std::nullopt;
 }
 
+bool RenderLayer::rendersToTerrain() const {
+    return layerGroup && layerGroup->shouldRenderToTerrain();
+}
+
 } // namespace mln
