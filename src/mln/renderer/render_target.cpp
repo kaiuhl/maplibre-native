@@ -5,6 +5,7 @@
 #include <mln/gfx/offscreen_texture.hpp>
 #include <mln/gfx/render_pass.hpp>
 #include <mln/gfx/uniform_buffer.hpp>
+#include <mln/renderer/bucket.hpp>
 #include <mln/renderer/layer_group.hpp>
 #include <mln/renderer/layer_tweaker.hpp>
 #include <mln/renderer/paint_parameters.hpp>
@@ -132,6 +133,22 @@ RenderTarget::DrapeCoverage RenderTarget::computeDrapeCoverage(RenderOrchestrato
     // a single label fading in bumps the epoch every frame - which defeated the cache
     // entirely (measured: all visible drape targets re-rendered every frame while
     // panning). coverage.propertiesEpoch is left at its default and no longer consulted.
+    // What a covering tile holds, not only which tile it is: the source bucket's id moves
+    // when the tile's data is replaced in place (a GeoJSON source given a new shape, a live
+    // source refreshed, an over-zoomed ancestor bucket upgraded to the tile's own) and
+    // stays put across paint changes and fades, so it re-bakes exactly those drapes. The
+    // frame and per-target signatures fold the same id (Renderer::Impl::render); without
+    // it here, a target whose signature moved found its coverage "the same" and kept the
+    // bake that showed the old data. Hillshade is left out as it is there: its drape
+    // samples the DEM prepare target, which has its own render-once lifecycle.
+    const auto foldTileContents = [](std::size_t& tileHash, const gfx::Drawable& drawable) {
+        if (drawable.getName() == "hillshade") {
+            return;
+        }
+        if (const auto& bucket = drawable.getBucket()) {
+            util::hash_combine(tileHash, bucket->getID().id());
+        }
+    };
     orchestrator.visitLayerGroups([&](LayerGroupBase& layerGroup) {
         if (layerGroup.getType() != LayerGroupBase::Type::TileLayerGroup || !layerGroup.shouldRenderToTerrain()) {
             return;
@@ -139,6 +156,7 @@ RenderTarget::DrapeCoverage RenderTarget::computeDrapeCoverage(RenderOrchestrato
         coverage.totalGroups++;
         bool haveExactOrDescendant = false;
         std::optional<UnwrappedTileID> bestAncestor;
+        std::size_t groupContents = 0;
         static_cast<TileLayerGroup&>(layerGroup).visitDrawables([&](const gfx::Drawable& drawable) {
             if (!drawable.getEnabled() || !drawable.getTileID()) {
                 return;
@@ -161,6 +179,7 @@ RenderTarget::DrapeCoverage RenderTarget::computeDrapeCoverage(RenderOrchestrato
                 util::hash_combine(tileHash, unwrapped.canonical.z);
                 util::hash_combine(tileHash, unwrapped.canonical.x);
                 util::hash_combine(tileHash, unwrapped.canonical.y);
+                foldTileContents(tileHash, drawable);
                 coverage.contentHash += tileHash;
             }
             if (unwrapped == *drapeTileID || unwrapped.isChildOf(*drapeTileID)) {
@@ -184,7 +203,9 @@ RenderTarget::DrapeCoverage RenderTarget::computeDrapeCoverage(RenderOrchestrato
             util::hash_combine(tileHash, unwrapped.canonical.z);
             util::hash_combine(tileHash, unwrapped.canonical.x);
             util::hash_combine(tileHash, unwrapped.canonical.y);
+            foldTileContents(tileHash, drawable);
             coverage.contentHash += tileHash;
+            groupContents += tileHash;
         });
         // Only the coarsest standalone fallback counts as lost detail; when an exact or
         // deeper tile is present the ancestor is clipped away by the tile masks and costs
@@ -195,7 +216,7 @@ RenderTarget::DrapeCoverage RenderTarget::computeDrapeCoverage(RenderOrchestrato
         } else if (bestAncestor) {
             deficit = static_cast<int16_t>(drapeTileID->canonical.z - bestAncestor->canonical.z);
         }
-        coverage.groups.push_back({layerGroup.getLayerIndex(), deficit});
+        coverage.groups.push_back({layerGroup.getLayerIndex(), deficit, groupContents});
     });
     return coverage;
 }
