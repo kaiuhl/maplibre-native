@@ -52,5 +52,16 @@ void Terrain::setExaggeration(float exaggeration) {
     observer->onTerrainChanged(*this);
 }
 
+Terrain::Wave Terrain::getWave() const {
+    return impl->wave;
+}
+
+void Terrain::setWave(const Wave& wave) {
+    auto impl_ = mutableImpl();
+    impl_->wave = wave;
+    impl = std::move(impl_);
+    observer->onTerrainChanged(*this);
+}
+
 } // namespace style
 } // namespace mln

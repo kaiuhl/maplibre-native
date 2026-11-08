@@ -617,6 +617,25 @@ const MLNExceptionName MLNRedundantSourceIdentifierException =
       terrain->getSource(), static_cast<float>(terrainExaggeration)));
 }
 
+- (void)setTerrainWaveCenter:(CLLocationCoordinate2D)center
+                       front:(double)front
+                       width:(double)width
+                        peak:(double)peak
+                       crest:(double)crest {
+  const mln::style::Terrain *terrain = self.rawStyle->getTerrain();
+  if (!terrain) {
+    return;
+  }
+  auto next = std::make_unique<mln::style::Terrain>(terrain->getSource(), terrain->getExaggeration());
+  next->setWave({.latitude = center.latitude,
+                 .longitude = center.longitude,
+                 .front = static_cast<float>(front),
+                 .width = static_cast<float>(width),
+                 .peak = static_cast<float>(peak),
+                 .crest = static_cast<float>(crest)});
+  self.rawStyle->setTerrain(std::move(next));
+}
+
 - (double)terrainExaggeration {
   const mln::style::Terrain *terrain = self.rawStyle->getTerrain();
   return terrain ? terrain->getExaggeration() : 1;

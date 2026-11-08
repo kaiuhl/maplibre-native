@@ -19,9 +19,10 @@ enum {
 struct alignas(16) TerrainDrawableUBO {
     /*  0 */ float4x4 matrix;
     /* 64 */ float4 dem_coords;
-    /* 80 */
+    /* 80 */ float4 wave; // centre x, y, front, width in tile units; width 0 = no wave
+    /* 96 */
 };
-static_assert(sizeof(TerrainDrawableUBO) == 5 * 16, "wrong size");
+static_assert(sizeof(TerrainDrawableUBO) == 6 * 16, "wrong size");
 
 struct alignas(16) TerrainTilePropsUBO {
     /*  0 */ float2 dem_tl;
@@ -36,11 +37,34 @@ struct alignas(16) TerrainEvaluatedPropsUBO {
     /*  0 */ float4 unpack; // DEM unpack vector for the source's encoding
     /* 16 */ float exaggeration;
     /* 20 */ float elevation_offset;
-    /* 24 */ float pad1;
-    /* 28 */ float pad2;
+    /* 24 */ float wave_peak;
+    /* 28 */ float wave_crest;
     /* 32 */
 };
 static_assert(sizeof(TerrainEvaluatedPropsUBO) == 32, "wrong size");
+
+// How much of its height the ground stands at `pos` (tile units) under a wave rolling out from
+// wave.xy (style::Terrain::Wave): flat ahead of the front at wave.z; behind it snapped up to `peak`
+// over the first `crest` of the width wave.w, easing out, 1 - (1 - x)^3; then settled to its own
+// height by the width's end, easing in and out, cubic. No wave (w <= 0) is the height everywhere.
+inline float terrain_wave(float2 pos, float4 wave, float peak, float crest) {
+    if (wave.w <= 0.0) {
+        return 1.0;
+    }
+    const float p = (wave.z - distance(pos, wave.xy)) / wave.w;
+    if (p <= 0.0) {
+        return 0.0;
+    }
+    if (p >= 1.0) {
+        return 1.0;
+    }
+    if (p < crest) {
+        return peak * (1.0 - pow(1.0 - p / crest, 3.0));
+    }
+    const float x = (p - crest) / (1.0 - crest);
+    const float settle = x < 0.5 ? 4.0 * x * x * x : 1.0 - pow(2.0 - 2.0 * x, 3.0) / 2.0;
+    return peak + (1.0 - peak) * settle;
+}
 
 )";
 
@@ -85,8 +109,10 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     // NEAREST and interpolated after decoding, matching maplibre-gl-js and the
     // elevated layers). Map into the bound DEM tile; an ancestor tile is bound as
     // a fallback while this tile's own DEM loads. dem_coords.w = DEM dimension.
+    const float exaggeration = props.exaggeration *
+                               terrain_wave(pos, drawable.wave, props.wave_peak, props.wave_crest);
     float elevation = get_elevation(pos, demTexture, demSampler, drawable.dem_coords, props.unpack,
-                                    drawable.dem_coords.w, props.exaggeration, 1.0);
+                                    drawable.dem_coords.w, exaggeration, 1.0);
 
     // Skirt vertices hang below the surface by elevation_offset, forming a curtain
     // that hides the cracks between neighbouring tiles at different zoom levels

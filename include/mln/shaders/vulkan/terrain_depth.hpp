@@ -29,6 +29,7 @@ layout(push_constant) uniform Constants {
 struct TerrainDrawableUBO {
     mat4 matrix;
     vec4 dem_coords;
+    vec4 wave; // drawn on Metal only (style::Terrain::Wave)
 };
 
 layout(std140, set = LAYER_SET_INDEX, binding = idTerrainDrawableUBO) readonly buffer TerrainDrawableUBOVector {

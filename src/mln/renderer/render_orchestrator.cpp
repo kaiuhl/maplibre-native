@@ -274,7 +274,12 @@ std::unique_ptr<RenderTree> RenderOrchestrator::createRenderTree(
 
     if (updateParameters->terrain) {
         if (renderTerrain && renderTerrain->getImpl() != *updateParameters->terrain) {
-            dropRenderTerrain();
+            // Only the height moving keeps the terrain (RenderTerrain::setImpl).
+            if (renderTerrain->getSourceID() == (*updateParameters->terrain)->sourceID) {
+                renderTerrain->setImpl(*updateParameters->terrain);
+            } else {
+                dropRenderTerrain();
+            }
         }
         if (!renderTerrain) {
             renderTerrain = std::make_unique<RenderTerrain>(*updateParameters->terrain);

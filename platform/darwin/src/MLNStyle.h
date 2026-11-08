@@ -1,3 +1,4 @@
+#import <CoreLocation/CoreLocation.h>
 #import <Foundation/Foundation.h>
 
 #import "MLNFoundation.h"
@@ -333,6 +334,24 @@ MLN_EXPORT
  ``terrainSourceIdentifier`` is `nil`.
  */
 @property (nonatomic) double terrainExaggeration;
+
+/**
+ Rolls a wave of height out over the terrain from `center`, frame by frame.
+
+ Behind the wave's front, `front` metres from `center`, the ground rises out of the
+ flat map to `peak` times its height within the first `crest` share of `width`
+ metres, and settles to its own height by `width` behind the front. Ahead of the
+ front the ground lies flat. Call it again with a front further out to move the
+ wave, and with a `width` of zero to end it, leaving the ground at its height.
+
+ Has no effect while ``terrainSourceIdentifier`` is `nil`. Setting
+ ``terrainExaggeration`` ends the wave.
+ */
+- (void)setTerrainWaveCenter:(CLLocationCoordinate2D)center
+                       front:(double)front
+                       width:(double)width
+                        peak:(double)peak
+                       crest:(double)crest;
 
 // MARK: Localizing Map Content
 

@@ -43,8 +43,10 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     // rendering only depth for the symbol occlusion pass
     const float2 pos = float2(vertx.pos.xy);
 
+    const float exaggeration = props.exaggeration *
+                               terrain_wave(pos, drawable.wave, props.wave_peak, props.wave_crest);
     const float elevation = get_elevation(pos, demTexture, demSampler, drawable.dem_coords, props.unpack,
-                                          drawable.dem_coords.w, props.exaggeration, 1.0);
+                                          drawable.dem_coords.w, exaggeration, 1.0);
 
     // Skirt vertices drop below the surface by elevation_offset (gl-js u_ele_delta)
     const float ele_delta = (float(vertx.pos.z) == 1.0) ? props.elevation_offset : 0.0;

@@ -14,6 +14,7 @@ out float v_elevation;
 layout (std140) uniform TerrainDrawableUBO {
     highp mat4 u_matrix;
     highp vec4 u_dem_tile_coords;
+    highp vec4 u_wave; // drawn on Metal only (style::Terrain::Wave)
 };
 
 layout (std140) uniform TerrainEvaluatedPropsUBO {
