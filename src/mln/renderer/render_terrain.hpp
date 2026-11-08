@@ -426,6 +426,16 @@ public:
     const Immutable<style::Terrain::Impl>& getImpl() const { return impl; }
 
     /**
+     * @brief Take a new exaggeration over the same DEM source in place.
+     *
+     * Everything the terrain holds - meshes, DEM textures, drape targets - is independent of the
+     * exaggeration, which is read per frame, and the elevation index rebuilds itself when it sees
+     * the exaggeration move. So an app can animate the height without the terrain being torn down
+     * and rebuilt, flat, on every step.
+     */
+    void setImpl(Immutable<style::Terrain::Impl> impl_) { impl = std::move(impl_); }
+
+    /**
      * @brief Get the terrain mesh for a specific tile
      *
      * Returns a cached mesh or generates a new one. The mesh is a regular grid
