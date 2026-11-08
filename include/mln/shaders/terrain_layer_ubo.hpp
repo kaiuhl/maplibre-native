@@ -9,9 +9,11 @@ struct alignas(16) TerrainDrawableUBO {
     /*  0 */ std::array<float, 4 * 4> matrix;
     /* 64 */ std::array<float, 4> dem_coords; // scale, x offset, y offset into the bound DEM
                                               // tile ({1,0,0,0} unless an ancestor is bound)
-    /* 80 */
+    /* 80 */ std::array<float, 4> wave;       // the wave's centre x, y, front and width in this
+                                              // tile's units (style::Terrain::Wave); width 0 = none
+    /* 96 */
 };
-static_assert(sizeof(TerrainDrawableUBO) == 5 * 16);
+static_assert(sizeof(TerrainDrawableUBO) == 6 * 16);
 
 // One entry per instance of the instanced GL terrain depth pass. The whole array is bound as
 // the TerrainDrawableUBO block and indexed by gl_InstanceID in terrain_depth.vertex. Kept
@@ -41,8 +43,8 @@ struct alignas(16) TerrainEvaluatedPropsUBO {
     /*  0 */ std::array<float, 4> unpack; // DEM unpack vector for the source's encoding
     /* 16 */ float exaggeration;
     /* 20 */ float elevation_offset;
-    /* 24 */ float pad1;
-    /* 28 */ float pad2;
+    /* 24 */ float wave_peak;  // style::Terrain::Wave::peak
+    /* 28 */ float wave_crest; // style::Terrain::Wave::crest
     /* 32 */
 };
 static_assert(sizeof(TerrainEvaluatedPropsUBO) == 32);

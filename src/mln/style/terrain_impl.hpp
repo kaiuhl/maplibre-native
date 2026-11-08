@@ -18,9 +18,10 @@ public:
 
     std::string sourceID;
     float exaggeration;
+    Terrain::Wave wave;
 
     bool operator==(const Impl& other) const {
-        return sourceID == other.sourceID && exaggeration == other.exaggeration;
+        return sourceID == other.sourceID && exaggeration == other.exaggeration && wave == other.wave;
     }
 };
 

@@ -31,6 +31,7 @@ struct GlobalIndexUBO {
 struct TerrainDrawableUBO {
     matrix: mat4x4<f32>,
     dem_coords: vec4<f32>,
+    wave: vec4<f32>, // drawn on Metal only (style::Terrain::Wave)
 };
 
 struct TerrainEvaluatedPropsUBO {

@@ -1788,8 +1788,8 @@ void RenderTerrain::updateInstancedDepthUBO(PaintParameters& parameters) {
     const shaders::TerrainEvaluatedPropsUBO propsUBO = {.unpack = getDEMUnpackVector(),
                                                         .exaggeration = getExaggeration(),
                                                         .elevation_offset = elevationOffset,
-                                                        .pad1 = 0.0f,
-                                                        .pad2 = 0.0f};
+                                                        .wave_peak = impl->wave.peak,
+                                                        .wave_crest = impl->wave.crest};
 
     depthLg->visitDrawables([&](gfx::Drawable& drawable) {
         auto& u = drawable.mutableUniformBuffers();

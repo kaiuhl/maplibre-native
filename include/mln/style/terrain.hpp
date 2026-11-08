@@ -42,6 +42,27 @@ public:
      */
     void setExaggeration(float exaggeration);
 
+    /**
+     * @brief A wave of height rolling out over the terrain from a point.
+     *
+     * Behind its front, at `front` metres from the centre, the ground rises out of the flat map to
+     * `peak` times its height within the first `crest` share of `width` metres, and settles to its
+     * own height by `width` behind the front. Ahead of the front the ground lies flat. A `width` of
+     * zero or less is no wave: the ground stands at its height everywhere.
+     */
+    struct Wave {
+        double latitude = 0;
+        double longitude = 0;
+        float front = 0;
+        float width = 0;
+        float peak = 1;
+        float crest = 0.2f;
+        bool operator==(const Wave&) const = default;
+    };
+
+    Wave getWave() const;
+    void setWave(const Wave& wave);
+
     // Internal implementation
     class Impl;
     Immutable<Impl> impl;
