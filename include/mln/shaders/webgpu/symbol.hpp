@@ -62,6 +62,8 @@ struct SymbolDrawableUBO {
     dem_exaggeration: f32,
     dem_enabled: f32,
     depth_enabled: f32,
+    wave: vec4<f32>, // drawn on Metal only (RenderTerrain::getDrawableWave)
+    wave_shape: vec4<f32>,
 };
 
 

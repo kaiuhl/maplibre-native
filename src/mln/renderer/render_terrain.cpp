@@ -53,6 +53,7 @@
 #include <mln/gfx/vertex_attribute.hpp> // VertexAttributeArray for the a_instance attribute
 
 #include <algorithm>
+#include <numbers>
 #include <cmath>
 #include <cstring>
 #include <functional>
@@ -907,6 +908,9 @@ std::optional<std::function<float(const Point<float>&)>> RenderTerrain::elevatio
     if (!demSource || !isEnabled()) {
         return std::nullopt;
     }
+    // Labels placed on the CPU stand on the ground as high as the wave has raised it, as the
+    // shaders stand the rest (terrain_wave).
+    const auto wave = getDrawableWave(tileID);
     const LoadedDEMTile* best = nullptr;
     const auto loaded = loadedDEMTiles(demSource);
     for (const auto& candidate : loaded) {
@@ -923,29 +927,78 @@ std::optional<std::function<float(const Point<float>&)>> RenderTerrain::elevatio
         if (!index) {
             return std::nullopt;
         }
-        return [index, tileID](const Point<float>& p) -> float {
+        const style::Terrain::Wave& shape = impl->wave;
+        return [index, tileID, wave, peak = shape.peak, crest = shape.crest](const Point<float>& p) -> float {
             const double tiles = static_cast<double>(1u << tileID.canonical.z);
             const double worldX = static_cast<double>(tileID.canonical.x) + tileID.wrap * tiles + p.x / util::EXTENT;
             const double worldY = static_cast<double>(tileID.canonical.y) + p.y / util::EXTENT;
             const LatLng latLng = Projection::unproject(
                 {worldX / tiles * util::tileSize_D, worldY / tiles * util::tileSize_D}, 1.0, LatLng::Unwrapped);
-            return static_cast<float>(index->getElevation(latLng).value_or(0.0));
+            return static_cast<float>(index->getElevation(latLng).value_or(0.0)) *
+                   waveHeight(p, wave, peak, crest);
         };
     }
     const DEMData* demData = best->data;
     const auto off = demSubTileOffset(tileID.canonical, best->id.canonical);
     const float exaggeration = getExaggeration();
-    return [this, tileID, demData, off, exaggeration](const Point<float>& p) -> float {
+    return [this, tileID, demData, off, exaggeration, wave](const Point<float>& p) -> float {
         // Line-label anchors and collision circles reach past the tile edge (the symbol buffer).
         // Inside the DEM tile, sample it; past it, find the neighbouring tile's height
         // (getElevation normalises the point into it) rather than clamp to this tile's edge.
         const float xInDem = (off.dx * util::EXTENT + p.x) / off.scale;
         const float yInDem = (off.dy * util::EXTENT + p.y) / off.scale;
+        const float risen = waveHeight(p, wave, impl->wave.peak, impl->wave.crest);
         if (xInDem < 0.0f || xInDem >= util::EXTENT || yInDem < 0.0f || yInDem >= util::EXTENT) {
-            return getElevationWithExaggeration(tileID, p.x, p.y);
+            return getElevationWithExaggeration(tileID, p.x, p.y) * risen;
         }
-        return sampleDEM(*demData, off, p.x, p.y) * exaggeration;
+        return sampleDEM(*demData, off, p.x, p.y) * exaggeration * risen;
     };
+}
+
+std::array<float, 4> RenderTerrain::getDrawableWave(const UnwrappedTileID& tileID) const {
+    const style::Terrain::Wave& wave = impl->wave;
+    if (wave.width <= 0.0f) {
+        return {0, 0, 0, 0};
+    }
+    // The wave's centre in world tiles at z0 (Web Mercator), x = (lon + 180) / 360,
+    // y = (1 - ln(tan(lat) + sec(lat)) / pi) / 2, and the z0 world tiles a metre of ground spans
+    // there, 1 / (2 pi R cos(lat)): mercator stretches ground by 1 / cos(lat).
+    const double lat = util::deg2rad(wave.latitude);
+    const double worldX = (wave.longitude + 180.0) / 360.0;
+    const double worldY = (1.0 - std::log(std::tan(lat) + 1.0 / std::cos(lat)) / std::numbers::pi) / 2.0;
+    const double scale = std::pow(2.0, tileID.canonical.z);
+    const double units = util::EXTENT * scale;
+    const double perMetre = units / (util::M2PI * util::EARTH_RADIUS_M * std::cos(lat));
+    return {static_cast<float>((worldX - (tileID.canonical.x + tileID.wrap * scale) / scale) * units),
+            static_cast<float>((worldY - tileID.canonical.y / scale) * units),
+            static_cast<float>(wave.front * perMetre),
+            static_cast<float>(wave.width * perMetre)};
+}
+
+std::array<float, 4> RenderTerrain::getWaveShape() const {
+    return {impl->wave.peak, impl->wave.crest, 0, 0};
+}
+
+float RenderTerrain::waveHeight(const Point<float>& pos,
+                                const std::array<float, 4>& wave,
+                                const float peak,
+                                const float crest) {
+    if (wave[3] <= 0.0f) {
+        return 1.0f;
+    }
+    const float p = (wave[2] - std::hypot(pos.x - wave[0], pos.y - wave[1])) / wave[3];
+    if (p <= 0.0f) {
+        return 0.0f;
+    }
+    if (p >= 1.0f) {
+        return 1.0f;
+    }
+    if (p < crest) {
+        return peak * (1.0f - std::pow(1.0f - p / crest, 3.0f));
+    }
+    const float x = (p - crest) / (1.0f - crest);
+    const float settle = x < 0.5f ? 4.0f * x * x * x : 1.0f - std::pow(2.0f - 2.0f * x, 3.0f) / 2.0f;
+    return peak + (1.0f - peak) * settle;
 }
 
 std::optional<LatLng> RenderTerrain::pickLatLng(const TransformState& state, const ScreenCoordinate& pixel) const {

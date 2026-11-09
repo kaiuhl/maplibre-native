@@ -142,6 +142,9 @@ void CircleLayerTweaker::execute(LayerGroupBase& layerGroup, const PaintParamete
             .dem_exaggeration = parameters.terrain ? parameters.terrain->getExaggeration() : 0.0f,
             .dem_enabled = terrainData ? 1.0f : 0.0f,
             .depth_enabled = terrainEnabled ? 1.0f : 0.0f,
+            .wave = parameters.terrain ? parameters.terrain->getDrawableWave(tileID)
+                                       : std::array<float, 4>{{0, 0, 0, 0}},
+            .wave_shape = parameters.terrain ? parameters.terrain->getWaveShape() : std::array<float, 4>{{0, 0, 0, 0}},
         };
 #if MLN_UBO_CONSOLIDATION
         drawable.setUBOIndex(i++);

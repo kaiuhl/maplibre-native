@@ -273,6 +273,17 @@ DEM texture in their layer tweaker via `RenderTerrain::getTerrainData()`, and
 calling the helper in their vertex shader (see the circle, symbol, and
 fill-extrusion layers for the pattern).
 
+On Metal, a wave of height can roll out over the terrain from a point
+(`style::Terrain::Wave`, `MLNStyle setTerrainWaveCenter:front:width:peak:crest:`).
+The terrain mesh and every layer standing on it scale their exaggeration by
+`terrain_wave()` (mtl/common.hpp) at their position, so circles, symbols and
+fill extrusions rise with the ground under them: each carries the wave in its
+tile's units (`RenderTerrain::getDrawableWave`) and its shape
+(`getWaveShape`) in its drawable UBO. The CPU elevation sampler that places
+line labels applies the same curve (`RenderTerrain::waveHeight`). The map side's
+height copy (`Map::getTerrainElevation`, the camera clamp) reads the whole
+ground. The other backends carry the UBO fields and draw no wave.
+
 ## Current Status
 
 Implemented:

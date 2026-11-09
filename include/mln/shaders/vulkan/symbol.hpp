@@ -73,6 +73,8 @@ struct SymbolDrawableUBO {
     float dem_exaggeration;
     float dem_enabled;
     float depth_enabled;
+    vec4 wave; // drawn on Metal only (RenderTerrain::getDrawableWave)
+    vec4 wave_shape;
 };
 
 layout(std140, set = LAYER_SET_INDEX, binding = idSymbolDrawableUBO) readonly buffer SymbolDrawableUBOVector {
@@ -329,6 +331,8 @@ struct SymbolDrawableUBO {
     float dem_exaggeration;
     float dem_enabled;
     float depth_enabled;
+    vec4 wave; // drawn on Metal only (RenderTerrain::getDrawableWave)
+    vec4 wave_shape;
 };
 
 layout(std140, set = LAYER_SET_INDEX, binding = idSymbolDrawableUBO) readonly buffer SymbolDrawableUBOVector {
@@ -703,6 +707,8 @@ struct SymbolDrawableUBO {
     float dem_exaggeration;
     float dem_enabled;
     float depth_enabled;
+    vec4 wave; // drawn on Metal only (RenderTerrain::getDrawableWave)
+    vec4 wave_shape;
 };
 
 layout(std140, set = LAYER_SET_INDEX, binding = idSymbolDrawableUBO) readonly buffer SymbolDrawableUBOVector {

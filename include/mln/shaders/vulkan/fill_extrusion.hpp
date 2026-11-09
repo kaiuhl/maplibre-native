@@ -76,6 +76,8 @@ struct FillExtrusionDrawableUBO {
     float dem_exaggeration;
     float dem_enabled;
     float pad2;
+    vec4 wave; // drawn on Metal only (RenderTerrain::getDrawableWave)
+    vec4 wave_shape;
 };
 
 layout(std140, set = LAYER_SET_INDEX, binding = idFillExtrusionDrawableUBO) readonly buffer FillExtrusionDrawableUBOVector {
@@ -245,6 +247,8 @@ struct FillExtrusionDrawableUBO {
     float dem_exaggeration;
     float dem_enabled;
     float pad2;
+    vec4 wave; // drawn on Metal only (RenderTerrain::getDrawableWave)
+    vec4 wave_shape;
 };
 
 layout(std140, set = LAYER_SET_INDEX, binding = idFillExtrusionDrawableUBO) readonly buffer FillExtrusionDrawableUBOVector {
@@ -446,6 +450,8 @@ struct FillExtrusionDrawableUBO {
     float dem_exaggeration;
     float dem_enabled;
     float pad2;
+    vec4 wave; // drawn on Metal only (RenderTerrain::getDrawableWave)
+    vec4 wave_shape;
 };
 
 layout(std140, set = LAYER_SET_INDEX, binding = idFillExtrusionDrawableUBO) readonly buffer FillExtrusionDrawableUBOVector {
@@ -721,6 +727,8 @@ struct FillExtrusionDrawableUBO {
     float dem_exaggeration;
     float dem_enabled;
     float pad2;
+    vec4 wave; // drawn on Metal only (RenderTerrain::getDrawableWave)
+    vec4 wave_shape;
 };
 
 layout(std140, set = LAYER_SET_INDEX, binding = idFillExtrusionDrawableUBO) readonly buffer FillExtrusionDrawableUBOVector {

@@ -68,6 +68,8 @@ layout (std140) uniform SymbolDrawableUBO {
     highp float u_dem_exaggeration;
     lowp float u_dem_enabled;
     lowp float u_depth_enabled;
+    highp vec4 u_wave; // drawn on Metal only (RenderTerrain::getDrawableWave)
+    highp vec4 u_wave_shape;
 };
 
 uniform sampler2D u_dem;

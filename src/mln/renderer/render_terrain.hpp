@@ -304,6 +304,23 @@ public:
     std::optional<std::function<float(const Point<float>&)>> elevationSampler(const UnwrappedTileID& tileID) const;
 
     /**
+     * @brief The wave the terrain rises in (style::Terrain::Wave) in `tileID`'s own units
+     * (0..EXTENT): its centre x and y, front and width, all zero when there is none. The terrain
+     * mesh and everything standing on it (symbols, circles, fill extrusions and elevationSampler)
+     * scale their height by waveHeight there, so labels and markers rise with their ground.
+     */
+    std::array<float, 4> getDrawableWave(const UnwrappedTileID& tileID) const;
+
+    /// The wave's peak and crest (style::Terrain::Wave), then two zeros: the shaders' wave_shape.
+    std::array<float, 4> getWaveShape() const;
+
+    /**
+     * @brief How much of its height the ground stands at `pos` (tile units) under `wave`
+     * (getDrawableWave): the Metal shaders' terrain_wave, line for line.
+     */
+    static float waveHeight(const Point<float>& pos, const std::array<float, 4>& wave, float peak, float crest);
+
+    /**
      * @brief Get the terrain exaggeration multiplier
      */
     float getExaggeration() const;

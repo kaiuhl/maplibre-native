@@ -30,9 +30,12 @@ struct alignas(16) CircleDrawableUBO {
     /* 152 */ float dem_enabled;
     // Terrain enabled: hide the circle behind it (calculate_visibility), as symbols' depth_enabled
     /* 156 */ float depth_enabled;
-    /* 160 */
+    // The wave the terrain rises in (RenderTerrain::getDrawableWave, getWaveShape)
+    /* 160 */ std::array<float, 4> wave;       // centre x, y, front, width in tile units; width 0 = none
+    /* 176 */ std::array<float, 4> wave_shape; // peak, crest, unused, unused
+    /* 192 */
 };
-static_assert(sizeof(CircleDrawableUBO) == 10 * 16);
+static_assert(sizeof(CircleDrawableUBO) == 12 * 16);
 
 /// Evaluated properties that do not depend on the tile
 struct alignas(16) CircleEvaluatedPropsUBO {

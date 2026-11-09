@@ -38,9 +38,11 @@ struct alignas(16) FillExtrusionDrawableUBO {
     /* 148 */ float dem_exaggeration;
     /* 152 */ float dem_enabled;
     /* 156 */ float pad2;
-    /* 160 */
+    /* 160 */ float4 wave;       // terrain wave: centre x, y, front, width in tile units
+    /* 176 */ float4 wave_shape; // peak, crest, unused, unused
+    /* 192 */
 };
-static_assert(sizeof(FillExtrusionDrawableUBO) == 10 * 16, "wrong size");
+static_assert(sizeof(FillExtrusionDrawableUBO) == 12 * 16, "wrong size");
 
 struct alignas(16) FillExtrusionTilePropsUBO {
     /*  0 */ float4 pattern_from;
@@ -137,7 +139,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     // ground-level floors slightly so buildings don't hang off a slope
     // (mirrors the GL fill_extrusion.vertex.glsl / maplibre-gl-js)
     const float ele = get_elevation(float2(vertx.centroid), demTexture, demSampler, drawable.dem_coords,
-                                    drawable.dem_unpack, drawable.dem_dim, drawable.dem_exaggeration,
+                                    drawable.dem_unpack, drawable.dem_dim,
+                                    drawable.dem_exaggeration * terrain_wave(float2(vertx.centroid), drawable.wave,
+                                                                             drawable.wave_shape.x, drawable.wave_shape.y),
                                     drawable.dem_enabled);
     base += ele - (base > 0.0 ? 0.0 : 10.0) * drawable.dem_enabled;
     height += ele;
@@ -291,7 +295,10 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     // stay attached on a slope
     const float ele = get_elevation(float2(outline[instanceID].centroid_pos), demTexture, demSampler,
                                     drawable.dem_coords, drawable.dem_unpack, drawable.dem_dim,
-                                    drawable.dem_exaggeration, drawable.dem_enabled);
+                                    drawable.dem_exaggeration *
+                                        terrain_wave(float2(outline[instanceID].centroid_pos), drawable.wave,
+                                                     drawable.wave_shape.x, drawable.wave_shape.y),
+                                    drawable.dem_enabled);
     base += ele - (base > 0.0 ? 0.0 : 10.0) * drawable.dem_enabled;
     height += ele;
 

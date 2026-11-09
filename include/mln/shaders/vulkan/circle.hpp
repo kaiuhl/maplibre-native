@@ -79,6 +79,8 @@ struct CircleDrawableUBO {
     float dem_exaggeration;
     float dem_enabled;
     float pad4;
+    vec4 wave; // drawn on Metal only (RenderTerrain::getDrawableWave)
+    vec4 wave_shape;
 };
 
 layout(std140, set = LAYER_SET_INDEX, binding = idCircleDrawableUBO) readonly buffer CircleDrawableUBOVector {

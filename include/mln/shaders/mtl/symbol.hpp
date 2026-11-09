@@ -51,9 +51,11 @@ struct alignas(16) SymbolDrawableUBO {
     /* 308 */ float dem_exaggeration;
     /* 312 */ float dem_enabled;
     /* 316 */ float depth_enabled;
-    /* 320 */
+    /* 320 */ float4 wave;       // terrain wave: centre x, y, front, width in tile units
+    /* 336 */ float4 wave_shape; // peak, crest, unused, unused
+    /* 352 */
 };
-static_assert(sizeof(SymbolDrawableUBO) == 20 * 16, "wrong size");
+static_assert(sizeof(SymbolDrawableUBO) == 22 * 16, "wrong size");
 
 struct alignas(16) SymbolTilePropsUBO {
     /*  0 */ /*bool*/ int is_text;
@@ -210,8 +212,11 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         size = drawable.size;
     }
 
+    // Stand on the ground as high as the terrain's wave has raised it (terrain_wave)
     const float ele = get_elevation(
-        a_pos, demTexture, demSampler, drawable.dem_coords, drawable.dem_unpack, drawable.dem_dim, drawable.dem_exaggeration, drawable.dem_enabled);
+        a_pos, demTexture, demSampler, drawable.dem_coords, drawable.dem_unpack, drawable.dem_dim,
+        drawable.dem_exaggeration * terrain_wave(a_pos, drawable.wave, drawable.wave_shape.x, drawable.wave_shape.y),
+        drawable.dem_enabled);
     const float4 projectedPoint = drawable.matrix * float4(a_pos, ele, 1);
     const float camera_to_anchor_distance = projectedPoint.w;
     // See comments in symbol_sdf.vertex
@@ -426,8 +431,11 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         size = drawable.size;
     }
 
+    // Stand on the ground as high as the terrain's wave has raised it (terrain_wave)
     const float ele = get_elevation(
-        a_pos, demTexture, demSampler, drawable.dem_coords, drawable.dem_unpack, drawable.dem_dim, drawable.dem_exaggeration, drawable.dem_enabled);
+        a_pos, demTexture, demSampler, drawable.dem_coords, drawable.dem_unpack, drawable.dem_dim,
+        drawable.dem_exaggeration * terrain_wave(a_pos, drawable.wave, drawable.wave_shape.x, drawable.wave_shape.y),
+        drawable.dem_enabled);
     const float4 projectedPoint = drawable.matrix * float4(a_pos, ele, 1);
     const float camera_to_anchor_distance = projectedPoint.w;
     // If the label is pitched with the map, layout is done in pitched space,
@@ -707,8 +715,11 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         size = drawable.size;
     }
 
+    // Stand on the ground as high as the terrain's wave has raised it (terrain_wave)
     const float ele = get_elevation(
-        a_pos, demTexture, demSampler, drawable.dem_coords, drawable.dem_unpack, drawable.dem_dim, drawable.dem_exaggeration, drawable.dem_enabled);
+        a_pos, demTexture, demSampler, drawable.dem_coords, drawable.dem_unpack, drawable.dem_dim,
+        drawable.dem_exaggeration * terrain_wave(a_pos, drawable.wave, drawable.wave_shape.x, drawable.wave_shape.y),
+        drawable.dem_enabled);
     const float4 projectedPoint = drawable.matrix * float4(a_pos, ele, 1);
     const float camera_to_anchor_distance = projectedPoint.w;
     // If the label is pitched with the map, layout is done in pitched space,

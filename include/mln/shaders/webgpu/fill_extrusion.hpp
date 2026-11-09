@@ -54,6 +54,8 @@ struct FillExtrusionDrawableUBO {
     dem_exaggeration: f32,
     dem_enabled: f32,
     pad2: f32,
+    wave: vec4<f32>, // drawn on Metal only (RenderTerrain::getDrawableWave)
+    wave_shape: vec4<f32>,
 };
 
 struct FillExtrusionPropsUBO {
@@ -235,6 +237,8 @@ struct FillExtrusionPatternDrawableUBO {
     dem_exaggeration: f32,
     dem_enabled: f32,
     pad2: f32,
+    wave: vec4<f32>, // drawn on Metal only (RenderTerrain::getDrawableWave)
+    wave_shape: vec4<f32>,
 };
 
 struct FillExtrusionPatternTilePropsUBO {
