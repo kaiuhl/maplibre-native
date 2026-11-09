@@ -82,6 +82,31 @@ inline float dem_texel(texture2d<float, access::sample> dem, int2 texel, float4 
     return dot(data, dem_unpack);
 }
 
+// How much of its height the ground stands at `pos` (tile units) under a wave rolling out from
+// wave.xy (style::Terrain::Wave): flat ahead of the front at wave.z; behind it snapped up to `peak`
+// over the first `crest` of the width wave.w, easing out, 1 - (1 - x)^3; then settled to its own
+// height by the width's end, easing in and out, cubic. No wave (w <= 0) is the height everywhere.
+// The terrain mesh and everything standing on it (symbols, circles, fill extrusions) scale their
+// exaggeration by it (RenderTerrain::getDrawableWave); RenderTerrain::waveHeight is its CPU twin.
+inline float terrain_wave(float2 pos, float4 wave, float peak, float crest) {
+    if (wave.w <= 0.0) {
+        return 1.0;
+    }
+    const float p = (wave.z - distance(pos, wave.xy)) / wave.w;
+    if (p <= 0.0) {
+        return 0.0;
+    }
+    if (p >= 1.0) {
+        return 1.0;
+    }
+    if (p < crest) {
+        return peak * (1.0 - pow(1.0 - p / crest, 3.0));
+    }
+    const float x = (p - crest) / (1.0 - crest);
+    const float settle = x < 0.5 ? 4.0 * x * x * x : 1.0 - pow(2.0 - 2.0 * x, 3.0) / 2.0;
+    return peak + (1.0 - peak) * settle;
+}
+
 inline float get_elevation(float2 pos,
                            texture2d<float, access::sample> dem,
                            sampler dem_sampler,

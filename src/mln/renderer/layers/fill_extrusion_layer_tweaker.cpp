@@ -166,7 +166,10 @@ void FillExtrusionLayerTweaker::execute(LayerGroupBase& layerGroup, const PaintP
             .dem_dim = terrainData ? terrainData->demDim : 0.0f,
             .dem_exaggeration = parameters.terrain ? parameters.terrain->getExaggeration() : 0.0f,
             .dem_enabled = terrainData ? 1.0f : 0.0f,
-            .pad2 = 0
+            .pad2 = 0,
+            .wave = parameters.terrain ? parameters.terrain->getDrawableWave(tileID)
+                                       : std::array<float, 4>{{0, 0, 0, 0}},
+            .wave_shape = parameters.terrain ? parameters.terrain->getWaveShape() : std::array<float, 4>{{0, 0, 0, 0}},
         };
 
 #if MLN_UBO_CONSOLIDATION

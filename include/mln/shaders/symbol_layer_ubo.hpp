@@ -45,9 +45,13 @@ struct alignas(16) SymbolDrawableUBO {
     // A distant label whose tile is outside the terrain cover must still hide
     // behind mountains, as in maplibre-gl-js.
     /* 316 */ float depth_enabled;
-    /* 320 */
+    // The wave the terrain rises in (RenderTerrain::getDrawableWave, getWaveShape): the label
+    // stands on the ground as high as the wave has raised it
+    /* 320 */ std::array<float, 4> wave;       // centre x, y, front, width in tile units; width 0 = none
+    /* 336 */ std::array<float, 4> wave_shape; // peak, crest, unused, unused
+    /* 352 */
 };
-static_assert(sizeof(SymbolDrawableUBO) == 20 * 16);
+static_assert(sizeof(SymbolDrawableUBO) == 22 * 16);
 
 struct alignas(16) SymbolTilePropsUBO {
     /*  0 */ /*bool*/ int is_text;

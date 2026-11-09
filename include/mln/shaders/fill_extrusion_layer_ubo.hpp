@@ -29,9 +29,12 @@ struct alignas(16) FillExtrusionDrawableUBO {
     /* 148 */ float dem_exaggeration;
     /* 152 */ float dem_enabled;
     /* 156 */ float pad2;
-    /* 160 */
+    // The wave the terrain rises in (RenderTerrain::getDrawableWave, getWaveShape)
+    /* 160 */ std::array<float, 4> wave;       // centre x, y, front, width in tile units; width 0 = none
+    /* 176 */ std::array<float, 4> wave_shape; // peak, crest, unused, unused
+    /* 192 */
 };
-static_assert(sizeof(FillExtrusionDrawableUBO) == 10 * 16);
+static_assert(sizeof(FillExtrusionDrawableUBO) == 12 * 16);
 
 struct alignas(16) FillExtrusionTilePropsUBO {
     /*  0 */ std::array<float, 4> pattern_from;

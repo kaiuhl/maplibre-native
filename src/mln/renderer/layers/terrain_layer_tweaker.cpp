@@ -7,7 +7,6 @@
 #include <mln/renderer/paint_parameters.hpp>
 #include <mln/renderer/render_terrain.hpp>
 #include <mln/shaders/terrain_layer_ubo.hpp>
-#include <mln/math/angles.hpp>
 #include <mln/shaders/shader_defines.hpp>
 #include <mln/util/constants.hpp>
 #include <mln/util/convert.hpp>
@@ -16,7 +15,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <numbers>
 
 namespace mln {
 
@@ -54,28 +52,6 @@ void TerrainLayerTweaker::execute(LayerGroupBase& layerGroup, const PaintParamet
                                                .wave_peak = wave.peak,
                                                .wave_crest = wave.crest};
     layerUniforms.createOrUpdate(idTerrainEvaluatedPropsUBO, &propsUBO, context);
-
-    // The wave's centre in world tiles at z0 (Web Mercator), and how many z0 world tiles a
-    // metre of ground spans there: 1 / (2 pi R cos(lat)), mercator stretching ground by 1/cos.
-    const double waveLat = util::deg2rad(wave.latitude);
-    const double waveX = (wave.longitude + 180.0) / 360.0;
-    const double waveY = (1.0 - std::log(std::tan(waveLat) + 1.0 / std::cos(waveLat)) / std::numbers::pi) / 2.0;
-    const double worldPerMetre = 1.0 / (util::M2PI * util::EARTH_RADIUS_M * std::cos(waveLat));
-    // This tile's wave: its centre, front and width in the tile's own units (0..EXTENT).
-    const auto tileWave = [&](const UnwrappedTileID& tile) -> std::array<float, 4> {
-        if (wave.width <= 0.0f) {
-            return {0, 0, 0, 0};
-        }
-        const double scale = std::pow(2.0, tile.canonical.z);
-        const double units = util::EXTENT * scale;
-        const double x = (waveX - (tile.canonical.x + tile.wrap * scale) / scale) * units;
-        const double y = (waveY - tile.canonical.y / scale) * units;
-        const double perMetre = worldPerMetre * units;
-        return {static_cast<float>(x),
-                static_cast<float>(y),
-                static_cast<float>(wave.front * perMetre),
-                static_cast<float>(wave.width * perMetre)};
-    };
 
 #if MLN_UBO_CONSOLIDATION
     int i = 0;
@@ -117,7 +93,7 @@ void TerrainLayerTweaker::execute(LayerGroupBase& layerGroup, const PaintParamet
 #endif
             .matrix = util::cast<float>(matrix),
             .dem_coords = terrain->getDrawableDemCoords(*drawable.getTileID()),
-            .wave = tileWave(tileID)
+            .wave = terrain->getDrawableWave(tileID)
         };
 
 #if !MLN_UBO_CONSOLIDATION

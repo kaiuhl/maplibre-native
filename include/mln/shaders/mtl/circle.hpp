@@ -38,9 +38,11 @@ struct alignas(16) CircleDrawableUBO {
     /* 148 */ float dem_exaggeration;
     /* 152 */ float dem_enabled;
     /* 156 */ float depth_enabled;
-    /* 160 */
+    /* 160 */ float4 wave;       // terrain wave: centre x, y, front, width in tile units
+    /* 176 */ float4 wave_shape; // peak, crest, unused, unused
+    /* 192 */
 };
-static_assert(sizeof(CircleDrawableUBO) == 10 * 16, "wrong size");
+static_assert(sizeof(CircleDrawableUBO) == 12 * 16, "wrong size");
 
 /// Evaluated properties that do not depend on the tile
 struct alignas(16) CircleEvaluatedPropsUBO {
@@ -166,7 +168,10 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                     drawable.dem_coords,
                                     drawable.dem_unpack,
                                     drawable.dem_dim,
-                                    drawable.dem_exaggeration,
+                                    drawable.dem_exaggeration * terrain_wave(circle_center,
+                                                                             drawable.wave,
+                                                                             drawable.wave_shape.x,
+                                                                             drawable.wave_shape.y),
                                     drawable.dem_enabled);
 
     float4 position;
